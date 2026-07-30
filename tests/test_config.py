@@ -69,12 +69,20 @@ def test_format_overrides_merge_after_profile(tmp_path) -> None:
     assert config.required_root_files == ("CUSTOM",)
 
 
-def test_cisco_options_are_preserved(tmp_path) -> None:
+def test_supported_cisco_options_are_preserved(tmp_path) -> None:
     write_config(
         tmp_path,
         {
             "schemaVersion": 1,
-            "security": {"sources": [{"name": "cisco", "enabled": False, "options": {"level": "strict"}}]},
+            "security": {
+                "sources": [
+                    {
+                        "name": "cisco",
+                        "enabled": False,
+                        "options": {"policy": "strict", "useBehavioral": True},
+                    }
+                ]
+            },
         },
     )
 
@@ -82,5 +90,23 @@ def test_cisco_options_are_preserved(tmp_path) -> None:
 
     assert diagnostics == []
     assert config.security_sources == (
-        {"name": "cisco", "enabled": False, "options": {"level": "strict"}},
+        {"name": "cisco", "enabled": False, "options": {"policy": "strict", "useBehavioral": True}},
     )
+
+
+def test_unknown_cisco_option_is_a_config_error(tmp_path) -> None:
+    write_config(
+        tmp_path,
+        {
+            "schemaVersion": 1,
+            "security": {
+                "sources": [
+                    {"name": "cisco", "enabled": True, "options": {"unrecognized": True}}
+                ]
+            },
+        },
+    )
+
+    _, diagnostics = load_config(tmp_path)
+
+    assert any(item.code == "CONFIG_INVALID" for item in diagnostics)

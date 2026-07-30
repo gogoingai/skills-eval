@@ -51,7 +51,11 @@
         "enabled": { "type": "boolean" },
         "options": {
           "type": "object",
-          "additionalProperties": true
+          "additionalProperties": false,
+          "properties": {
+            "policy": { "enum": ["balanced", "strict", "permissive"] },
+            "useBehavioral": { "type": "boolean" }
+          }
         }
       }
     }
