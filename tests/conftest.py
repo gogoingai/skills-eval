@@ -5,6 +5,8 @@ import json
 
 import pytest
 
+from skills_eval.config import EvalConfig
+
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
 
@@ -41,3 +43,28 @@ def plugin_factory(tmp_path: Path):
         return root
 
     return create
+
+
+@pytest.fixture
+def portable_config() -> EvalConfig:
+    return EvalConfig(
+        required_root_files=(),
+        required_skill_frontmatter=("name", "description"),
+        forbidden_paths=(),
+        reference_extensions=(".md",),
+        security_sources=(),
+    )
+
+
+@pytest.fixture
+def wenqu_config() -> EvalConfig:
+    return EvalConfig(
+        required_root_files=("README.md", "README.en.md", "VERSION"),
+        required_skill_frontmatter=("name", "description", "slug"),
+        forbidden_paths=(".DS_Store",),
+        reference_extensions=(".md", ".txt", ".pdf", ".png", ".jpg", ".jpeg", ".webp"),
+        security_sources=(),
+        require_marketplace_metadata=True,
+        require_openclaw_metadata=True,
+        require_image_references=True,
+    )
