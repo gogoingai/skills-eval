@@ -1,0 +1,11 @@
+{
+  "format": {
+    "requiredRootFiles": ["README.md", "README.en.md", "VERSION"],
+    "requiredSkillFrontmatter": ["name", "description", "slug"],
+    "forbiddenPaths": [".DS_Store"],
+    "referenceExtensions": [".md", ".txt", ".pdf", ".png", ".jpg", ".jpeg", ".webp"],
+    "requireMarketplaceMetadata": true,
+    "requireOpenClawMetadata": true,
+    "requireImageReferences": true
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/gogoingai/skills-eval/main/src/skills_eval/schemas/skills-eval.schema.json",
+  "title": "skills-eval configuration",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "extends": {
+      "type": "array",
+      "items": { "enum": ["wenqu"] },
+      "uniqueItems": true
+    },
+    "format": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requiredRootFiles": { "$ref": "#/$defs/stringArray" },
+        "requiredSkillFrontmatter": { "$ref": "#/$defs/stringArray" },
+        "forbiddenPaths": { "$ref": "#/$defs/stringArray" },
+        "referenceExtensions": { "$ref": "#/$defs/stringArray" },
+        "requireMarketplaceMetadata": { "type": "boolean" },
+        "requireOpenClawMetadata": { "type": "boolean" },
+        "requireImageReferences": { "type": "boolean" }
+      }
+    },
+    "security": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sources": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/securitySource" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "stringArray": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "securitySource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "enabled"],
+      "properties": {
+        "name": { "const": "cisco" },
+        "enabled": { "type": "boolean" },
+        "options": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}
