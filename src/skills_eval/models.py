@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Any, Iterable
+from types import MappingProxyType
 
 import yaml
 
@@ -34,7 +36,11 @@ class Diagnostic:
 class Skill:
     name: str
     path: Path
-    frontmatter: dict[str, object] | None = None
+    frontmatter: Mapping[str, object] | None = None
+
+    def __post_init__(self) -> None:
+        if self.frontmatter is not None:
+            object.__setattr__(self, "frontmatter", _freeze_frontmatter(self.frontmatter))
 
 
 @dataclass(frozen=True)
@@ -114,6 +120,16 @@ def highest_severity(items: Iterable[Diagnostic | Finding]) -> Severity:
     if Severity.REVIEW in severities:
         return Severity.REVIEW
     return Severity.PASS
+
+
+def _freeze_frontmatter(value: object) -> object:
+    if isinstance(value, Mapping):
+        return MappingProxyType({key: _freeze_frontmatter(item) for key, item in value.items()})
+    if isinstance(value, list | tuple):
+        return tuple(_freeze_frontmatter(item) for item in value)
+    if isinstance(value, set | frozenset):
+        return frozenset(_freeze_frontmatter(item) for item in value)
+    return value
 
 
 def parse_frontmatter(text: str) -> dict[str, object] | None:
