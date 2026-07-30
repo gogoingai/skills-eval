@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import yaml
+
 from skills_eval.models import Diagnostic, Plugin, Severity, Skill, parse_frontmatter
 
 
@@ -21,7 +23,7 @@ def discover_plugin(root: Path) -> tuple[Plugin | None, list[Diagnostic]]:
         raw_manifest = manifest_path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return None, [_diagnostic("PLUGIN_MANIFEST_MISSING", "Plugin manifest is missing.", manifest_path)]
-    except OSError as error:
+    except (OSError, UnicodeDecodeError) as error:
         return None, [_diagnostic("PLUGIN_MANIFEST_UNREADABLE", str(error), manifest_path)]
 
     try:
@@ -47,6 +49,15 @@ def discover_plugin(root: Path) -> tuple[Plugin | None, list[Diagnostic]]:
         if not isinstance(declared_path, str) or not declared_path.strip():
             diagnostics.append(
                 _diagnostic("SKILL_PATH_INVALID", "Skill path must be a non-empty string.", manifest_path)
+            )
+            continue
+        if not declared_path.startswith("./"):
+            diagnostics.append(
+                _diagnostic(
+                    "SKILL_PATH_INVALID",
+                    "Skill path must start with './'.",
+                    manifest_path,
+                )
             )
             continue
 
@@ -77,7 +88,7 @@ def discover_plugin(root: Path) -> tuple[Plugin | None, list[Diagnostic]]:
             continue
         try:
             frontmatter = parse_frontmatter(skill_file.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, ValueError) as error:
+        except (OSError, UnicodeDecodeError, ValueError, yaml.YAMLError) as error:
             diagnostics.append(_diagnostic("SKILL_FILE_INVALID", str(error), skill_file))
             continue
 

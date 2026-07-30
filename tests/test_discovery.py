@@ -23,13 +23,23 @@ def test_discovery_retains_valid_skills_when_sibling_is_missing(plugin_factory) 
 
 
 def test_discovery_rejects_path_outside_plugin_root(plugin_factory) -> None:
-    root = plugin_factory(skills=["./write", "../outside"])
+    root = plugin_factory(skills=["./write", "./../outside"])
 
     plugin, diagnostics = discover_plugin(root)
 
     assert plugin is not None
     assert [skill.name for skill in plugin.skills] == ["write"]
     assert any(item.code == "SKILL_PATH_OUTSIDE_ROOT" for item in diagnostics)
+
+
+def test_discovery_rejects_skill_path_without_dot_slash_prefix(plugin_factory) -> None:
+    root = plugin_factory(skills=["./write", "write"])
+
+    plugin, diagnostics = discover_plugin(root)
+
+    assert plugin is not None
+    assert [skill.name for skill in plugin.skills] == ["write"]
+    assert any(item.code == "SKILL_PATH_INVALID" for item in diagnostics)
 
 
 def test_discovery_rejects_duplicate_frontmatter_names(plugin_factory) -> None:
@@ -50,6 +60,27 @@ def test_discovery_reports_malformed_plugin_json(plugin_factory) -> None:
 
     assert plugin is None
     assert any(item.code == "PLUGIN_JSON_INVALID" for item in diagnostics)
+
+
+def test_discovery_reports_non_utf8_plugin_manifest(plugin_factory) -> None:
+    root = plugin_factory()
+    (root / ".claude-plugin" / "plugin.json").write_bytes(b"\xff")
+
+    plugin, diagnostics = discover_plugin(root)
+
+    assert plugin is None
+    assert any(item.code == "PLUGIN_MANIFEST_UNREADABLE" for item in diagnostics)
+
+
+def test_discovery_retains_valid_siblings_with_malformed_frontmatter(plugin_factory) -> None:
+    root = plugin_factory(skills=["./write", "./broken"])
+    (root / "broken" / "SKILL.md").write_text("---\nname: [\n---\n", encoding="utf-8")
+
+    plugin, diagnostics = discover_plugin(root)
+
+    assert plugin is not None
+    assert [skill.name for skill in plugin.skills] == ["write"]
+    assert any(item.code == "SKILL_FILE_INVALID" for item in diagnostics)
 
 
 def test_selection_rejects_selector_matching_two_names(plugin_factory) -> None:
