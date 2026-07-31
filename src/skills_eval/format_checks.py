@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -24,6 +25,7 @@ _WENQU_IMAGE_REFERENCE = re.compile(
     r"wenqu-image-assets/styles/([A-Za-z0-9._/-]+\.(?:png|jpe?g|webp|gif|svg))",
     re.IGNORECASE,
 )
+_HOST_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
 
 
 def check_format(root: Path, plugin: Plugin, skills: list[Skill], config: EvalConfig) -> list[Diagnostic]:
@@ -182,16 +184,32 @@ def _check_openclaw_homepages(skills: list[Skill], diagnostics: list[Diagnostic]
 
 
 def _is_valid_https_url(value: str) -> bool:
+    if not value or value != value.strip() or any(character.isspace() for character in value):
+        return False
     try:
         parsed = urlsplit(value)
         hostname = parsed.hostname
         _ = parsed.port
     except ValueError:
         return False
-    return (
-        parsed.scheme == "https"
-        and bool(hostname)
-        and not any(character.isspace() for character in hostname)
+    return parsed.scheme == "https" and bool(hostname) and _is_valid_hostname(hostname)
+
+
+def _is_valid_hostname(hostname: str) -> bool:
+    hostname = hostname.rstrip(".")
+    if not hostname:
+        return False
+    try:
+        ipaddress.ip_address(hostname)
+        return True
+    except ValueError:
+        pass
+    try:
+        ascii_hostname = hostname.encode("idna").decode("ascii")
+    except UnicodeError:
+        return False
+    return len(ascii_hostname) <= 253 and all(
+        _HOST_LABEL.fullmatch(label) for label in ascii_hostname.split(".")
     )
 
 

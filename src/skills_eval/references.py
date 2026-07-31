@@ -73,6 +73,6 @@ def _clean_target(raw_target: str, *, quoted: bool) -> str | None:
 def _looks_like_path(target: str, *, quoted: bool) -> bool:
     """Keep quoted-path extraction conservative to avoid prose false positives."""
     if quoted:
-        return "/" in target
+        return target.startswith(("./", "../")) or Path(target).suffix != ""
     path = Path(target)
     return "/" in target or path.suffix != ""
