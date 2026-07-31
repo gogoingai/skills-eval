@@ -8,9 +8,10 @@ from urllib.parse import urlsplit
 
 
 _MARKDOWN_LINK = re.compile(
-    r"(?<!!)\[[^\]]*\]\(\s*(?P<target><[^>]+>|[^)\s]+)(?:\s+['\"][^)]*['\"])?\s*\)"
+    r"(?<!!)\[[^\]]*\]\(\s*(?P<target><[^>]+>|[^)\s]+)"
+    r"(?:\s+(?P<title>\"[^\"]*\"|'[^']*'))?\s*\)"
 )
-_QUOTED_PATH = re.compile(r"(?P<quote>['\"])(?P<target>[^'\"\r\n]+)(?P=quote)")
+_QUOTED_PATH = re.compile(r"(?P<quote>['\"])(?P<target>[^'\"\s\r\n]+)(?P=quote)")
 
 
 def extract_local_references(text: str, source: Path, root: Path) -> list[Path]:
@@ -24,10 +25,14 @@ def extract_local_references(text: str, source: Path, root: Path) -> list[Path]:
     targets: list[Path] = []
     seen: set[Path] = set()
 
-    for match in _MARKDOWN_LINK.finditer(text):
-        _append_target(match.group("target"), source, root, targets, seen)
+    markdown_links = list(_MARKDOWN_LINK.finditer(text))
+    for match in markdown_links:
+        _append_target(match.group("target"), source, root, targets, seen, quoted=False)
+    title_spans = [match.span("title") for match in markdown_links if match.group("title")]
     for match in _QUOTED_PATH.finditer(text):
-        _append_target(match.group("target"), source, root, targets, seen)
+        if any(start <= match.start() and match.end() <= end for start, end in title_spans):
+            continue
+        _append_target(match.group("target"), source, root, targets, seen, quoted=True)
     return targets
 
 
@@ -37,8 +42,10 @@ def _append_target(
     root: Path,
     targets: list[Path],
     seen: set[Path],
+    *,
+    quoted: bool,
 ) -> None:
-    target = _clean_target(raw_target)
+    target = _clean_target(raw_target, quoted=quoted)
     if target is None:
         return
     candidate = (source.parent / target).resolve()
@@ -47,7 +54,7 @@ def _append_target(
         targets.append(candidate)
 
 
-def _clean_target(raw_target: str) -> str | None:
+def _clean_target(raw_target: str, *, quoted: bool) -> str | None:
     target = raw_target.strip()
     if target.startswith("<") and target.endswith(">"):
         target = target[1:-1].strip()
@@ -58,12 +65,14 @@ def _clean_target(raw_target: str) -> str | None:
     if parsed.scheme or target.startswith("//"):
         return None
     target = parsed.path
-    if not target or not _looks_like_path(target):
+    if not target or not _looks_like_path(target, quoted=quoted):
         return None
     return target
 
 
-def _looks_like_path(target: str) -> bool:
-    """Avoid treating quoted prose as a path while retaining ordinary files."""
+def _looks_like_path(target: str, *, quoted: bool) -> bool:
+    """Keep quoted-path extraction conservative to avoid prose false positives."""
+    if quoted:
+        return "/" in target
     path = Path(target)
     return "/" in target or path.suffix != ""

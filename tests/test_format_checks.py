@@ -27,7 +27,14 @@ def _write_wenqu_release_files(root, *, version: str = "1.2.3") -> None:
         json.dumps(
             {
                 "name": "example-plugin",
-                "plugins": [{"name": "example-plugin", "source": "./", "version": version}],
+                "plugins": [
+                    {
+                        "name": "example-plugin",
+                        "source": "./",
+                        "version": version,
+                        "description": "Example plugin.",
+                    }
+                ],
             }
         ),
         encoding="utf-8",
@@ -96,6 +103,23 @@ def test_extract_local_references_normalizes_markdown_and_quoted_paths(tmp_path)
     ]
 
 
+def test_extract_local_references_ignores_quoted_prose_and_markdown_link_titles(tmp_path) -> None:
+    root = tmp_path / "plugin"
+    source = root / "write" / "SKILL.md"
+    referenced = source.parent / "references" / "guide.md"
+    referenced.parent.mkdir(parents=True)
+    referenced.write_text("# Guide\n", encoding="utf-8")
+
+    references = extract_local_references(
+        'Call it "guide.md" in prose. '
+        '[guide](references/guide.md "guide.md")',
+        source,
+        root,
+    )
+
+    assert references == [referenced.resolve()]
+
+
 def test_format_reports_invalid_missing_and_non_scalar_frontmatter(plugin_factory, portable_config) -> None:
     root = plugin_factory()
     plugin, _ = discover_plugin(root)
@@ -114,6 +138,20 @@ def test_format_reports_missing_and_invalid_required_frontmatter_values(plugin_f
     _skill_file(root).write_text("---\nname: []\n---\n", encoding="utf-8")
 
     diagnostics = check_format(root, plugin, list(plugin.skills), portable_config)
+
+    assert {"FRONTMATTER_REQUIRED", "FRONTMATTER_VALUE_INVALID"} <= _codes(diagnostics)
+
+
+def test_format_always_requires_portable_name_and_description(plugin_factory, portable_config) -> None:
+    root = plugin_factory()
+    plugin, _ = discover_plugin(root)
+    assert plugin is not None
+    _skill_file(root).write_text("---\nname: '   '\n---\n", encoding="utf-8")
+    no_extra_requirements = portable_config.__class__(
+        **{**portable_config.__dict__, "required_skill_frontmatter": ()}
+    )
+
+    diagnostics = check_format(root, plugin, list(plugin.skills), no_extra_requirements)
 
     assert {"FRONTMATTER_REQUIRED", "FRONTMATTER_VALUE_INVALID"} <= _codes(diagnostics)
 
@@ -164,6 +202,44 @@ def test_wenqu_checks_release_metadata_and_openclaw_homepage(plugin_factory, wen
     diagnostics = check_format(root, plugin, list(plugin.skills), wenqu_config)
 
     assert {"CHANGELOG_VERSION_MISSING", "MARKET_NAME_MISMATCH", "MARKET_VERSION_MISMATCH", "OPENCLAW_HOMEPAGE_INVALID"} <= _codes(diagnostics)
+
+
+def test_wenqu_rejects_https_homepage_without_a_hostname(plugin_factory, wenqu_config) -> None:
+    root = plugin_factory()
+    _write_wenqu_release_files(root)
+    _skill_file(root).write_text(
+        _skill_file(root).read_text(encoding="utf-8").replace(
+            "https://example.test/write", "https:///write"
+        ),
+        encoding="utf-8",
+    )
+    plugin, _ = discover_plugin(root)
+    assert plugin is not None
+
+    diagnostics = check_format(root, plugin, list(plugin.skills), wenqu_config)
+
+    assert "OPENCLAW_HOMEPAGE_INVALID" in _codes(diagnostics)
+
+
+def test_wenqu_profile_accepts_a_clean_release(plugin_factory, wenqu_config) -> None:
+    root = plugin_factory()
+    _write_wenqu_release_files(root)
+    plugin, _ = discover_plugin(root)
+    assert plugin is not None
+
+    diagnostics = check_format(root, plugin, list(plugin.skills), wenqu_config)
+
+    assert diagnostics == []
+
+
+def test_wenqu_only_checks_are_gated_for_portable_plugins(plugin_factory, portable_config) -> None:
+    root = plugin_factory()
+    plugin, _ = discover_plugin(root)
+    assert plugin is not None
+
+    diagnostics = check_format(root, plugin, list(plugin.skills), portable_config)
+
+    assert diagnostics == []
 
 
 def test_wenqu_checks_missing_and_unreferenced_image_assets(plugin_factory, wenqu_config) -> None:

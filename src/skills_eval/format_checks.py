@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 from typing import Iterator
+from urllib.parse import urlsplit
 
 import pathspec
 import yaml
@@ -71,7 +72,8 @@ def _check_skill_frontmatter(skills: list[Skill], config: EvalConfig, diagnostic
         if frontmatter is None:
             _fail(diagnostics, "FRONTMATTER_INVALID", "SKILL.md must begin with mapping YAML frontmatter.", skill_file)
             continue
-        for key in config.required_skill_frontmatter:
+        required_keys = dict.fromkeys(("name", "description", *config.required_skill_frontmatter))
+        for key in required_keys:
             if key not in frontmatter:
                 _fail(diagnostics, "FRONTMATTER_REQUIRED", f"SKILL.md frontmatter is missing {key!r}.", skill_file)
             elif not _is_nonempty_scalar(frontmatter[key]):
@@ -175,8 +177,22 @@ def _check_openclaw_homepages(skills: list[Skill], diagnostics: list[Diagnostic]
         homepage = openclaw.get("homepage") if isinstance(openclaw, dict) else None
         if not isinstance(homepage, str) or not homepage.strip():
             _fail(diagnostics, "OPENCLAW_HOMEPAGE_MISSING", "SKILL.md is missing metadata.openclaw.homepage", skill_file)
-        elif not homepage.startswith("https://"):
+        elif not _is_valid_https_url(homepage):
             _fail(diagnostics, "OPENCLAW_HOMEPAGE_INVALID", f"Invalid OpenClaw homepage: {homepage}", skill_file)
+
+
+def _is_valid_https_url(value: str) -> bool:
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname
+        _ = parsed.port
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "https"
+        and bool(hostname)
+        and not any(character.isspace() for character in hostname)
+    )
 
 
 def _check_wenqu_image_assets(root: Path, diagnostics: list[Diagnostic]) -> None:
