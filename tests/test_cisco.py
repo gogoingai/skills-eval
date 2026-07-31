@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import textwrap
+import time
 
 import pytest
 
@@ -196,6 +198,58 @@ def test_cisco_adapter_turns_timeout_into_execution_diagnostic(
     assert outcome.diagnostic.code == "CISCO_PROCESS_TIMEOUT"
     assert "partial output" in outcome.diagnostic.detail
     assert "scan exceeded limit" in outcome.diagnostic.detail
+
+
+def test_timeout_kills_descendant_holding_capture_pipes(tmp_path) -> None:
+    survivor_marker = tmp_path / "descendant-survived"
+    descendant_code = (
+        "import time; from pathlib import Path; "
+        f"time.sleep(0.2); Path({str(survivor_marker)!r}).write_text('alive')"
+    )
+    scanner_code = (
+        "import subprocess, sys, time; "
+        f"subprocess.Popen([sys.executable, '-c', {descendant_code!r}]); "
+        "print('scanner started', flush=True); "
+        "time.sleep(1)"
+    )
+    probe = textwrap.dedent(
+        f"""
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        from skills_eval.security import cisco
+
+        real_run_scanner = cisco.run_scanner
+        cisco._SCANNER_TIMEOUT_SECONDS = 0.05
+
+        def run_descendant_process(_args):
+            return real_run_scanner(
+                [
+                    sys.executable,
+                    "-c",
+                    {scanner_code!r},
+                ]
+            )
+
+        cisco.run_scanner = run_descendant_process
+        outcome = cisco.CiscoScanner().scan(Path("."), {{}})
+        print(outcome.diagnostic.code if outcome.diagnostic else "missing diagnostic")
+        """
+    )
+
+    completed = subprocess.run(
+        [sys.executable, "-c", probe],
+        capture_output=True,
+        text=True,
+        timeout=0.75,
+        check=False,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout.strip() == "CISCO_PROCESS_TIMEOUT"
+    time.sleep(0.3)
+    assert not survivor_marker.exists()
 
 
 def test_run_scanner_bounds_stdout_and_stderr_before_returning(monkeypatch) -> None:

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import signal
 import subprocess
 import tempfile
-from threading import Thread
+from threading import Lock, Thread
 from typing import Any
 
 from skills_eval.models import Severity
@@ -24,6 +26,8 @@ _DETAIL_LIMIT = 2_000
 _PROCESS_OUTPUT_LIMIT = 64 * 1024
 _JSON_OUTPUT_LIMIT = 16 * 1024 * 1024
 _SCANNER_TIMEOUT_SECONDS = 300.0
+_CAPTURE_JOIN_TIMEOUT_SECONDS = 0.25
+_PROCESS_TERMINATION_TIMEOUT_SECONDS = 1.0
 _READ_CHUNK_SIZE = 8 * 1024
 _SUPPORTED_OPTIONS = frozenset({"policy", "useBehavioral"})
 
@@ -34,20 +38,21 @@ def run_scanner(args: list[str]) -> tuple[int, str, str]:
         args,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        **_process_group_options(),
     )
     assert process.stdout is not None
     assert process.stderr is not None
 
-    stdout_result: list[str] = []
-    stderr_result: list[str] = []
+    stdout_capture = _BoundedStreamCapture()
+    stderr_capture = _BoundedStreamCapture()
     stdout_thread = Thread(
-        target=_drain_process_stream,
-        args=(process.stdout, stdout_result),
+        target=stdout_capture.drain,
+        args=(process.stdout,),
         daemon=True,
     )
     stderr_thread = Thread(
-        target=_drain_process_stream,
-        args=(process.stderr, stderr_result),
+        target=stderr_capture.drain,
+        args=(process.stderr,),
         daemon=True,
     )
     stdout_thread.start()
@@ -58,13 +63,18 @@ def run_scanner(args: list[str]) -> tuple[int, str, str]:
         return_code = process.wait(timeout=_SCANNER_TIMEOUT_SECONDS)
     except subprocess.TimeoutExpired:
         timed_out = True
-        process.kill()
-        return_code = process.wait()
+        _terminate_process_group(process)
+        return_code = _wait_for_process(process)
 
-    stdout_thread.join()
-    stderr_thread.join()
-    stdout = stdout_result[0] if stdout_result else ""
-    stderr = stderr_result[0] if stderr_result else ""
+    captures_complete = _join_capture_threads(stdout_thread, stderr_thread)
+    if not captures_complete:
+        timed_out = True
+        _terminate_process_group(process)
+        return_code = _wait_for_process(process)
+        _join_capture_threads(stdout_thread, stderr_thread)
+
+    stdout = stdout_capture.text()
+    stderr = stderr_capture.text()
     if timed_out:
         raise subprocess.TimeoutExpired(
             cmd=args,
@@ -354,23 +364,83 @@ def _read_json_output(path: Path) -> str:
     return contents.decode("utf-8")
 
 
-def _drain_process_stream(stream: Any, result: list[str]) -> None:
-    captured = bytearray()
-    truncated = False
-    try:
-        while chunk := stream.read(_READ_CHUNK_SIZE):
-            remaining = _PROCESS_OUTPUT_LIMIT - len(captured)
-            if remaining > 0:
-                captured.extend(chunk[:remaining])
-            if len(chunk) > max(remaining, 0):
-                truncated = True
-    finally:
-        stream.close()
+class _BoundedStreamCapture:
+    def __init__(self) -> None:
+        self._contents = bytearray()
+        self._truncated = False
+        self._lock = Lock()
 
-    text = captured.decode("utf-8", errors="replace")
-    if truncated:
-        text = f"{text}\n[truncated]"
-    result.append(text)
+    def drain(self, stream: Any) -> None:
+        try:
+            while chunk := stream.read(_READ_CHUNK_SIZE):
+                with self._lock:
+                    remaining = _PROCESS_OUTPUT_LIMIT - len(self._contents)
+                    if remaining > 0:
+                        self._contents.extend(chunk[:remaining])
+                    if len(chunk) > max(remaining, 0):
+                        self._truncated = True
+        finally:
+            stream.close()
+
+    def text(self) -> str:
+        with self._lock:
+            contents = bytes(self._contents)
+            truncated = self._truncated
+        text = contents.decode("utf-8", errors="replace")
+        if truncated:
+            return f"{text}\n[truncated]"
+        return text
+
+
+def _process_group_options() -> dict[str, object]:
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
+    if os.name == "nt":
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=_PROCESS_TERMINATION_TIMEOUT_SECONDS,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            pass
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    if process.poll() is None:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+
+
+def _wait_for_process(process: subprocess.Popen[bytes]) -> int:
+    try:
+        return process.wait(timeout=_PROCESS_TERMINATION_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+        except ProcessLookupError:
+            pass
+        try:
+            return process.wait(timeout=_PROCESS_TERMINATION_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            return process.returncode if process.returncode is not None else -1
+
+
+def _join_capture_threads(*threads: Thread) -> bool:
+    for thread in threads:
+        thread.join(timeout=_CAPTURE_JOIN_TIMEOUT_SECONDS)
+    return all(not thread.is_alive() for thread in threads)
 
 
 def _output_text(value: str | bytes | None) -> str:
