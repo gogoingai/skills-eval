@@ -9,6 +9,8 @@ from skills_eval.security.base import (
 )
 from skills_eval.security.cisco import CiscoScanner
 
+ScannerRegistry.register("cisco", CiscoScanner, replace=True)
+
 __all__ = [
     "CiscoScanner",
     "ExecutionDiagnostic",

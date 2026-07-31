@@ -1,12 +1,14 @@
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 
 from skills_eval.models import Diagnostic, Finding, Severity
 from skills_eval.security import ScannerRegistry
-from skills_eval.security.base import SecurityScanner
-from skills_eval.security.cisco import CiscoScanner
+from skills_eval.security.base import ScanOutcome, SecurityScanner
+from skills_eval.security.cisco import CiscoScanner, run_scanner
 
 
 def _write_scanner_output(args: list[str], payload: object) -> None:
@@ -125,7 +127,6 @@ def test_cisco_adapter_uses_supported_options_and_deletes_temporary_output(
         {
             "policy": "strict",
             "useBehavioral": True,
-            "unrecognized": "--dangerous",
         },
     )
 
@@ -138,9 +139,103 @@ def test_cisco_adapter_uses_supported_options_and_deletes_temporary_output(
         "json",
     ]
     assert observed_args[-3:] == ["--policy", "strict", "--use-behavioral"]
-    assert "--dangerous" not in observed_args
     assert output_path is not None
     assert not output_path.exists()
+
+
+def test_cisco_adapter_rejects_unknown_option_keys(monkeypatch, tmp_path) -> None:
+    called = False
+
+    def fake_run(*args):
+        nonlocal called
+        called = True
+        return 0, '{"findings": []}', ""
+
+    monkeypatch.setattr("skills_eval.security.cisco.run_scanner", fake_run)
+
+    outcome = CiscoScanner().scan(tmp_path, {"unrecognized": "--dangerous"})
+
+    assert outcome.status is Severity.FAIL
+    assert outcome.diagnostic is not None
+    assert outcome.diagnostic.code == "CISCO_OPTIONS_INVALID"
+    assert called is False
+
+
+def test_run_scanner_times_out_and_retains_bounded_output(monkeypatch) -> None:
+    monkeypatch.setattr("skills_eval.security.cisco._SCANNER_TIMEOUT_SECONDS", 0.2)
+
+    with pytest.raises(subprocess.TimeoutExpired) as caught:
+        run_scanner(
+            [
+                sys.executable,
+                "-c",
+                "import time; print('started', flush=True); time.sleep(2)",
+            ]
+        )
+
+    assert "started" in (caught.value.stdout or "")
+
+
+def test_cisco_adapter_turns_timeout_into_execution_diagnostic(
+    monkeypatch, tmp_path
+) -> None:
+    def timed_out(*args):
+        raise subprocess.TimeoutExpired(
+            cmd=["skill-scanner"],
+            timeout=5,
+            output="partial output",
+            stderr="scan exceeded limit",
+        )
+
+    monkeypatch.setattr("skills_eval.security.cisco.run_scanner", timed_out)
+
+    outcome = CiscoScanner().scan(tmp_path, {})
+
+    assert outcome.status is Severity.FAIL
+    assert outcome.diagnostic is not None
+    assert outcome.diagnostic.code == "CISCO_PROCESS_TIMEOUT"
+    assert "partial output" in outcome.diagnostic.detail
+    assert "scan exceeded limit" in outcome.diagnostic.detail
+
+
+def test_run_scanner_bounds_stdout_and_stderr_before_returning(monkeypatch) -> None:
+    monkeypatch.setattr("skills_eval.security.cisco._PROCESS_OUTPUT_LIMIT", 128)
+
+    return_code, stdout, stderr = run_scanner(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import sys; "
+                "sys.stdout.write('o' * 10000); "
+                "sys.stderr.write('e' * 10000)"
+            ),
+        ]
+    )
+
+    assert return_code == 0
+    assert len(stdout) < 256
+    assert len(stderr) < 256
+    assert stdout.endswith("[truncated]")
+    assert stderr.endswith("[truncated]")
+
+
+def test_cisco_adapter_rejects_oversized_json_before_loading(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.setattr("skills_eval.security.cisco._JSON_OUTPUT_LIMIT", 64)
+
+    def fake_run(args):
+        _write_scanner_output(args, {"findings": [], "padding": "x" * 1000})
+        return 0, "", ""
+
+    monkeypatch.setattr("skills_eval.security.cisco.run_scanner", fake_run)
+
+    outcome = CiscoScanner().scan(tmp_path, {})
+
+    assert outcome.status is Severity.FAIL
+    assert outcome.diagnostic is not None
+    assert outcome.diagnostic.code == "CISCO_OUTPUT_TOO_LARGE"
 
 
 def test_cisco_adapter_reports_process_failure_with_bounded_detail(monkeypatch, tmp_path) -> None:
@@ -268,6 +363,19 @@ def test_registry_creates_cisco_scanner() -> None:
 
     assert isinstance(scanner, CiscoScanner)
     assert isinstance(scanner, SecurityScanner)
+
+
+def test_registry_creates_registered_scanner_from_injected_factory() -> None:
+    class CustomScanner:
+        def scan(self, skill_path: Path, options: dict[str, object]) -> ScanOutcome:
+            return ScanOutcome(Severity.PASS)
+
+    scanner = CustomScanner()
+    ScannerRegistry.register("custom", lambda: scanner)
+    try:
+        assert ScannerRegistry.create("custom") is scanner
+    finally:
+        ScannerRegistry.unregister("custom")
 
 
 def test_registry_rejects_unknown_scanner() -> None:

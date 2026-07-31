@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import ClassVar, Protocol, runtime_checkable
 
 from skills_eval.models import Diagnostic, Finding, Severity
 
@@ -62,10 +63,35 @@ class SecurityScanner(Protocol):
 class ScannerRegistry:
     """Create supported scanner adapters by their configuration name."""
 
-    @staticmethod
-    def create(name: str) -> SecurityScanner:
-        if name == "cisco":
-            from skills_eval.security.cisco import CiscoScanner
+    _factories: ClassVar[dict[str, Callable[[], SecurityScanner]]] = {}
 
-            return CiscoScanner()
-        raise ValueError(f"Unknown security scanner: {name!r}")
+    @classmethod
+    def register(
+        cls,
+        name: str,
+        factory: Callable[[], SecurityScanner],
+        *,
+        replace: bool = False,
+    ) -> None:
+        """Register a scanner factory without changing registry dispatch code."""
+        if not name:
+            raise ValueError("Security scanner name must not be empty.")
+        if name in cls._factories and not replace:
+            raise ValueError(f"Security scanner is already registered: {name!r}")
+        cls._factories[name] = factory
+
+    @classmethod
+    def unregister(cls, name: str) -> None:
+        """Remove a scanner registration."""
+        cls._factories.pop(name, None)
+
+    @classmethod
+    def create(cls, name: str) -> SecurityScanner:
+        try:
+            factory = cls._factories[name]
+        except KeyError:
+            raise ValueError(f"Unknown security scanner: {name!r}") from None
+        scanner = factory()
+        if not isinstance(scanner, SecurityScanner):
+            raise TypeError(f"Security scanner factory returned an invalid adapter: {name!r}")
+        return scanner

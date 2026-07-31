@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import subprocess
 import tempfile
+from threading import Thread
 from typing import Any
 
 from skills_eval.models import Severity
@@ -20,17 +21,58 @@ _POLICIES = frozenset({"balanced", "strict", "permissive"})
 _FAIL_SEVERITIES = frozenset({"critical", "high"})
 _REVIEW_SEVERITIES = frozenset({"medium", "low", "info"})
 _DETAIL_LIMIT = 2_000
+_PROCESS_OUTPUT_LIMIT = 64 * 1024
+_JSON_OUTPUT_LIMIT = 16 * 1024 * 1024
+_SCANNER_TIMEOUT_SECONDS = 300.0
+_READ_CHUNK_SIZE = 8 * 1024
+_SUPPORTED_OPTIONS = frozenset({"policy", "useBehavioral"})
 
 
 def run_scanner(args: list[str]) -> tuple[int, str, str]:
-    """Run the external scanner without invoking a shell."""
-    completed = subprocess.run(
+    """Run the external scanner with bounded execution and captured output."""
+    process = subprocess.Popen(
         args,
-        capture_output=True,
-        text=True,
-        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
     )
-    return completed.returncode, completed.stdout, completed.stderr
+    assert process.stdout is not None
+    assert process.stderr is not None
+
+    stdout_result: list[str] = []
+    stderr_result: list[str] = []
+    stdout_thread = Thread(
+        target=_drain_process_stream,
+        args=(process.stdout, stdout_result),
+        daemon=True,
+    )
+    stderr_thread = Thread(
+        target=_drain_process_stream,
+        args=(process.stderr, stderr_result),
+        daemon=True,
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+
+    timed_out = False
+    try:
+        return_code = process.wait(timeout=_SCANNER_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        process.kill()
+        return_code = process.wait()
+
+    stdout_thread.join()
+    stderr_thread.join()
+    stdout = stdout_result[0] if stdout_result else ""
+    stderr = stderr_result[0] if stderr_result else ""
+    if timed_out:
+        raise subprocess.TimeoutExpired(
+            cmd=args,
+            timeout=_SCANNER_TIMEOUT_SECONDS,
+            output=stdout,
+            stderr=stderr,
+        )
+    return return_code, stdout, stderr
 
 
 class CiscoScanner:
@@ -74,6 +116,13 @@ class CiscoScanner:
 
             try:
                 return_code, stdout, stderr = run_scanner(args)
+            except subprocess.TimeoutExpired as error:
+                return _failed(
+                    "CISCO_PROCESS_TIMEOUT",
+                    f"Cisco scanner exceeded the {error.timeout:g}-second execution limit.",
+                    stdout=_output_text(error.stdout),
+                    stderr=_output_text(error.stderr),
+                )
             except FileNotFoundError:
                 return _failed(
                     "CISCO_EXECUTABLE_MISSING",
@@ -95,7 +144,14 @@ class CiscoScanner:
                 )
 
             try:
-                output_text = output_path.read_text(encoding="utf-8")
+                output_text = _read_json_output(output_path)
+            except _OutputTooLarge:
+                return _failed(
+                    "CISCO_OUTPUT_TOO_LARGE",
+                    f"Cisco scanner JSON output exceeds the {_JSON_OUTPUT_LIMIT}-byte limit.",
+                    stdout=stdout,
+                    stderr=stderr,
+                )
             except (OSError, UnicodeDecodeError) as error:
                 return _failed(
                     "CISCO_OUTPUT_UNREADABLE",
@@ -114,6 +170,12 @@ class CiscoScanner:
                     "CISCO_OUTPUT_UNREADABLE",
                     "Cisco scanner did not produce JSON output.",
                     stdout=stdout,
+                    stderr=stderr,
+                )
+            if len(output_text) > _JSON_OUTPUT_LIMIT:
+                return _failed(
+                    "CISCO_OUTPUT_TOO_LARGE",
+                    f"Cisco scanner JSON output exceeds the {_JSON_OUTPUT_LIMIT}-character limit.",
                     stderr=stderr,
                 )
 
@@ -155,6 +217,9 @@ class CiscoScanner:
 
 
 def _validate_options(options: dict[str, object]) -> str | None:
+    unknown_options = sorted(set(options) - _SUPPORTED_OPTIONS)
+    if unknown_options:
+        return f"Unknown Cisco option: {unknown_options[0]!r}."
     policy = options.get("policy", "balanced")
     if not isinstance(policy, str) or policy not in _POLICIES:
         return "Cisco option 'policy' must be balanced, strict, or permissive."
@@ -275,3 +340,42 @@ def _bounded(value: str) -> str:
     if len(value) <= _DETAIL_LIMIT:
         return value
     return f"{value[:_DETAIL_LIMIT]}… [truncated]"
+
+
+class _OutputTooLarge(ValueError):
+    """Raised before loading an oversized scanner artifact."""
+
+
+def _read_json_output(path: Path) -> str:
+    with path.open("rb") as output:
+        contents = output.read(_JSON_OUTPUT_LIMIT + 1)
+    if len(contents) > _JSON_OUTPUT_LIMIT:
+        raise _OutputTooLarge
+    return contents.decode("utf-8")
+
+
+def _drain_process_stream(stream: Any, result: list[str]) -> None:
+    captured = bytearray()
+    truncated = False
+    try:
+        while chunk := stream.read(_READ_CHUNK_SIZE):
+            remaining = _PROCESS_OUTPUT_LIMIT - len(captured)
+            if remaining > 0:
+                captured.extend(chunk[:remaining])
+            if len(chunk) > max(remaining, 0):
+                truncated = True
+    finally:
+        stream.close()
+
+    text = captured.decode("utf-8", errors="replace")
+    if truncated:
+        text = f"{text}\n[truncated]"
+    result.append(text)
+
+
+def _output_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
