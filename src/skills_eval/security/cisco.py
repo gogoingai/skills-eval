@@ -55,34 +55,42 @@ def run_scanner(args: list[str]) -> tuple[int, str, str]:
         args=(process.stderr,),
         daemon=True,
     )
-    stdout_thread.start()
-    stderr_thread.start()
-
-    timed_out = False
     try:
-        return_code = process.wait(timeout=_SCANNER_TIMEOUT_SECONDS)
+        stdout_thread.start()
+        stderr_thread.start()
+
+        timed_out = False
+        try:
+            return_code = process.wait(timeout=_SCANNER_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            _terminate_process_group(process)
+            return_code = _wait_for_process(process)
+
+        captures_complete = _join_capture_threads(stdout_thread, stderr_thread)
+        if not captures_complete:
+            timed_out = True
+            _terminate_process_group(process)
+            return_code = _wait_for_process(process)
+            _join_capture_threads(stdout_thread, stderr_thread)
+
+        stdout = stdout_capture.text()
+        stderr = stderr_capture.text()
+        if timed_out:
+            raise subprocess.TimeoutExpired(
+                cmd=args,
+                timeout=_SCANNER_TIMEOUT_SECONDS,
+                output=stdout,
+                stderr=stderr,
+            )
+        return return_code, stdout, stderr
     except subprocess.TimeoutExpired:
-        timed_out = True
+        raise
+    except BaseException:
         _terminate_process_group(process)
-        return_code = _wait_for_process(process)
-
-    captures_complete = _join_capture_threads(stdout_thread, stderr_thread)
-    if not captures_complete:
-        timed_out = True
-        _terminate_process_group(process)
-        return_code = _wait_for_process(process)
+        _wait_for_process(process)
         _join_capture_threads(stdout_thread, stderr_thread)
-
-    stdout = stdout_capture.text()
-    stderr = stderr_capture.text()
-    if timed_out:
-        raise subprocess.TimeoutExpired(
-            cmd=args,
-            timeout=_SCANNER_TIMEOUT_SECONDS,
-            output=stdout,
-            stderr=stderr,
-        )
-    return return_code, stdout, stderr
+        raise
 
 
 class CiscoScanner:
@@ -439,8 +447,9 @@ def _wait_for_process(process: subprocess.Popen[bytes]) -> int:
 
 def _join_capture_threads(*threads: Thread) -> bool:
     for thread in threads:
-        thread.join(timeout=_CAPTURE_JOIN_TIMEOUT_SECONDS)
-    return all(not thread.is_alive() for thread in threads)
+        if thread.ident is not None:
+            thread.join(timeout=_CAPTURE_JOIN_TIMEOUT_SECONDS)
+    return all(thread.ident is None or not thread.is_alive() for thread in threads)
 
 
 def _output_text(value: str | bytes | None) -> str:

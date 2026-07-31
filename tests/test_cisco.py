@@ -1,5 +1,7 @@
 import json
+import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import textwrap
@@ -250,6 +252,64 @@ def test_timeout_kills_descendant_holding_capture_pipes(tmp_path) -> None:
     assert completed.stdout.strip() == "CISCO_PROCESS_TIMEOUT"
     time.sleep(0.3)
     assert not survivor_marker.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process-group regression")
+def test_keyboard_interrupt_terminates_descendant_group(
+    monkeypatch, tmp_path
+) -> None:
+    ready_marker = tmp_path / "scanner-ready"
+    survivor_marker = tmp_path / "descendant-survived"
+    descendant_code = (
+        "import time; from pathlib import Path; "
+        f"time.sleep(0.2); Path({str(survivor_marker)!r}).write_text('alive')"
+    )
+    scanner_code = (
+        "import subprocess, sys, time; from pathlib import Path; "
+        f"subprocess.Popen([sys.executable, '-c', {descendant_code!r}]); "
+        f"Path({str(ready_marker)!r}).write_text('ready'); "
+        "time.sleep(1)"
+    )
+    real_popen = subprocess.Popen
+    spawned: list[tuple[subprocess.Popen, object]] = []
+
+    def interrupting_popen(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        original_wait = process.wait
+        interrupted = False
+
+        def interrupt_once(timeout=None):
+            nonlocal interrupted
+            if not interrupted:
+                deadline = time.monotonic() + 0.5
+                while not ready_marker.exists() and time.monotonic() < deadline:
+                    time.sleep(0.01)
+                if not ready_marker.exists():
+                    raise AssertionError("scanner descendant was not ready")
+                interrupted = True
+                raise KeyboardInterrupt
+            return original_wait(timeout=timeout)
+
+        process.wait = interrupt_once
+        spawned.append((process, original_wait))
+        return process
+
+    monkeypatch.setattr("skills_eval.security.cisco.subprocess.Popen", interrupting_popen)
+
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            run_scanner([sys.executable, "-c", scanner_code])
+
+        time.sleep(0.3)
+        assert not survivor_marker.exists()
+    finally:
+        for process, original_wait in spawned:
+            if process.poll() is None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            original_wait(timeout=1)
 
 
 def test_run_scanner_bounds_stdout_and_stderr_before_returning(monkeypatch) -> None:
