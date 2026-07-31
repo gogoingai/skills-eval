@@ -246,6 +246,8 @@ def test_wenqu_rejects_https_homepage_without_a_hostname(plugin_factory, wenqu_c
         "https://example_test.test/write",
         "https://-example.test/write",
         "https://example..test/write",
+        "https://example.test../write",
+        "https://example.test.../write",
         "https://example.test/a path",
         "https://example.test:invalid/write",
     ],
@@ -267,6 +269,23 @@ def test_wenqu_rejects_malformed_https_homepages(plugin_factory, wenqu_config, h
     diagnostics = check_format(root, plugin, list(plugin.skills), wenqu_config)
 
     assert "OPENCLAW_HOMEPAGE_INVALID" in _codes(diagnostics)
+
+
+def test_wenqu_accepts_single_trailing_dot_fqdn(plugin_factory, wenqu_config) -> None:
+    root = plugin_factory()
+    _write_wenqu_release_files(root)
+    _skill_file(root).write_text(
+        _skill_file(root).read_text(encoding="utf-8").replace(
+            "https://example.test/write", "https://example.test./write"
+        ),
+        encoding="utf-8",
+    )
+    plugin, _ = discover_plugin(root)
+    assert plugin is not None
+
+    diagnostics = check_format(root, plugin, list(plugin.skills), wenqu_config)
+
+    assert diagnostics == []
 
 
 def test_wenqu_profile_accepts_a_clean_release(plugin_factory, wenqu_config) -> None:

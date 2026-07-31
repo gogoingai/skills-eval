@@ -196,7 +196,10 @@ def _is_valid_https_url(value: str) -> bool:
 
 
 def _is_valid_hostname(hostname: str) -> bool:
-    hostname = hostname.rstrip(".")
+    if hostname.endswith("."):
+        hostname = hostname[:-1]
+    if hostname.endswith("."):
+        return False
     if not hostname:
         return False
     try:
