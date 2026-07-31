@@ -6,6 +6,8 @@ import json
 import pytest
 
 from skills_eval.config import EvalConfig
+from skills_eval.models import CheckResult, Severity, Skill, SkillResult
+from skills_eval.security import SecurityFinding
 
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src"))
@@ -67,4 +69,41 @@ def wenqu_config() -> EvalConfig:
         require_marketplace_metadata=True,
         require_openclaw_metadata=True,
         require_image_references=True,
+    )
+
+
+@pytest.fixture
+def sample_result() -> CheckResult:
+    """Return a warning result with a detailed Cisco finding for report tests."""
+    skill = Skill(
+        name="write",
+        path=Path("skills/write"),
+        frontmatter={"name": "write", "description": "Write an article."},
+        format_status=Severity.PASS,
+        security_status=Severity.REVIEW,
+    )
+    finding = SecurityFinding(
+        severity=Severity.REVIEW,
+        code="PI-001",
+        message="Injected instruction",
+        path=Path("SKILL.md"),
+        source="cisco",
+        rule_id="PI-001",
+        line=12,
+        detail="Untrusted text requests an unsafe action.",
+        remediation="Treat the text as data.",
+        evidence="ignore previous instructions",
+        source_severity="medium",
+    )
+    return CheckResult(
+        plugin_name="example-plugin",
+        skills=(skill,),
+        skill_results=(SkillResult(skill=skill, findings=(finding,)),),
+        security_sources=(
+            {
+                "name": "cisco",
+                "enabled": True,
+                "options": {"policy": "strict", "useBehavioral": True},
+            },
+        ),
     )
