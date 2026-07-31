@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
 from pathlib import Path
 
 from skills_eval.config import EvalConfig, load_config
@@ -11,90 +10,19 @@ from skills_eval.discovery import discover_plugin, select_skill
 from skills_eval.format_checks import check_format
 from skills_eval.models import (
     CheckResult,
-    CheckStatus,
     Diagnostic,
     Finding,
     Severity,
     Skill,
     SkillResult,
     highest_severity,
+    highest_status,
 )
-from skills_eval.security import ExecutionDiagnostic, ScannerRegistry
-
-
-@dataclass(frozen=True)
-class CheckedSkill(Skill):
-    """A discovered Skill enriched with the checks performed by this service."""
-
-    format_status: Severity = Severity.PASS
-    security_status: Severity | None = None
-    planned_security_sources: tuple[str, ...] = ()
-    diagnostics: tuple[Diagnostic, ...] = ()
-    findings: tuple[Finding, ...] = ()
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        object.__setattr__(
-            self,
-            "planned_security_sources",
-            tuple(self.planned_security_sources),
-        )
-        object.__setattr__(self, "diagnostics", tuple(self.diagnostics))
-        object.__setattr__(self, "findings", tuple(self.findings))
-
-    @property
-    def severity(self) -> Severity:
-        return _highest_status(
-            self.format_status,
-            self.security_status or Severity.PASS,
-        )
-
-    @property
-    def status(self) -> CheckStatus:
-        return _check_status(self.severity)
-
-
-@dataclass(frozen=True)
-class ServiceCheckResult(CheckResult):
-    """A shared CheckResult with service execution metadata."""
-
-    dry_run: bool = False
-    planned_security_sources: tuple[str, ...] = ()
-    security_sources: tuple[Mapping[str, object], ...] = ()
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        object.__setattr__(
-            self,
-            "planned_security_sources",
-            tuple(self.planned_security_sources),
-        )
-        object.__setattr__(self, "security_sources", tuple(self.security_sources))
-
-    @property
-    def severity(self) -> Severity:
-        global_severity = highest_severity((*self.diagnostics, *self.findings))
-        skill_severities = tuple(
-            skill.severity
-            for skill in self.skills
-            if isinstance(skill, CheckedSkill)
-        )
-        return _highest_status(global_severity, *skill_severities)
-
-    @property
-    def exit_code(self) -> int:
-        diagnostics = (
-            *self.diagnostics,
-            *(
-                diagnostic
-                for skill in self.skills
-                if isinstance(skill, CheckedSkill)
-                for diagnostic in skill.diagnostics
-            ),
-        )
-        if any(_is_invocation_or_execution_error(item) for item in diagnostics):
-            return 2
-        return super().exit_code
+from skills_eval.security import (
+    ExecutionDiagnostic,
+    ScannerRegistry,
+    SecurityScanner,
+)
 
 
 def run_check(root: Path, selector: str | None, dry_run: bool) -> CheckResult:
@@ -108,7 +36,7 @@ def run_check(root: Path, selector: str | None, dry_run: bool) -> CheckResult:
     planned_sources = tuple(_source_name(source) for source in enabled_sources)
 
     if plugin is None:
-        return ServiceCheckResult(
+        return CheckResult(
             plugin_name=root.name,
             diagnostics=tuple(global_diagnostics),
             dry_run=dry_run,
@@ -125,7 +53,7 @@ def run_check(root: Path, selector: str | None, dry_run: bool) -> CheckResult:
     )
     global_diagnostics.extend(repository_format_diagnostics)
 
-    scanner_entries: list[tuple[str, object, dict[str, object]]] = []
+    scanner_entries: list[tuple[str, SecurityScanner, dict[str, object]]] = []
     scanner_creation_failed = False
     if not dry_run:
         for source in enabled_sources:
@@ -144,7 +72,7 @@ def run_check(root: Path, selector: str | None, dry_run: bool) -> CheckResult:
                 continue
             scanner_entries.append((name, scanner, _source_options(source)))
 
-    checked_skills: list[CheckedSkill] = []
+    checked_skills: list[Skill] = []
     skill_results: list[SkillResult] = []
     for skill in selected_skills:
         format_items = skill_format_diagnostics.get(skill.path, [])
@@ -174,18 +102,15 @@ def run_check(root: Path, selector: str | None, dry_run: bool) -> CheckResult:
                 findings.extend(outcome.findings)
                 if outcome.diagnostic is not None:
                     security_diagnostics.append(outcome.diagnostic)
-            security_status = _highest_status(*security_statuses)
+            security_status = highest_status(security_statuses)
 
         diagnostics = (*format_items, *security_diagnostics)
-        checked_skill = CheckedSkill(
+        checked_skill = Skill(
             name=skill.name,
             path=skill.path,
             frontmatter=skill.frontmatter,
             format_status=highest_severity(format_items),
             security_status=security_status,
-            planned_security_sources=planned_sources,
-            diagnostics=diagnostics,
-            findings=tuple(findings),
         )
         checked_skills.append(checked_skill)
         skill_results.append(
@@ -196,7 +121,7 @@ def run_check(root: Path, selector: str | None, dry_run: bool) -> CheckResult:
             )
         )
 
-    return ServiceCheckResult(
+    return CheckResult(
         plugin_name=plugin.name,
         skills=tuple(checked_skills),
         diagnostics=tuple(global_diagnostics),
@@ -255,27 +180,3 @@ def _associate_format_diagnostics(
         else:
             associated[matching_skill.path].append(diagnostic)
     return associated, repository
-
-
-def _highest_status(*statuses: Severity) -> Severity:
-    if Severity.FAIL in statuses:
-        return Severity.FAIL
-    if Severity.REVIEW in statuses:
-        return Severity.REVIEW
-    return Severity.PASS
-
-
-def _check_status(severity: Severity) -> CheckStatus:
-    if severity is Severity.FAIL:
-        return CheckStatus.NOT_READY
-    if severity is Severity.REVIEW:
-        return CheckStatus.READY_WITH_WARNINGS
-    return CheckStatus.READY
-
-
-def _is_invocation_or_execution_error(diagnostic: Diagnostic) -> bool:
-    return isinstance(diagnostic, ExecutionDiagnostic) or diagnostic.code in {
-        "CONFIG_INVALID",
-        "SKILL_SELECTOR_NOT_FOUND",
-        "SKILL_SELECTOR_AMBIGUOUS",
-    }

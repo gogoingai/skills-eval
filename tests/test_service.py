@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from skills_eval.models import CheckStatus, Severity
+from skills_eval.models import CheckResult, CheckStatus, Severity, Skill
 from skills_eval.security import ExecutionDiagnostic, ScanOutcome, SecurityFinding
 from skills_eval.service import run_check
 
@@ -16,6 +16,11 @@ class RecordingScanner:
     def scan(self, skill_path: Path, options: dict[str, object]) -> ScanOutcome:
         self.calls.append((skill_path, options))
         return self.outcomes.get(skill_path.name, ScanOutcome(status=Severity.PASS))
+
+
+class RaisingScanner:
+    def scan(self, skill_path: Path, options: dict[str, object]) -> ScanOutcome:
+        raise RuntimeError("adapter escaped its normal error boundary")
 
 
 def _write_security_config(root: Path, sources: list[dict[str, object]]) -> None:
@@ -41,10 +46,11 @@ def test_dry_run_discovers_checks_but_never_invokes_scanner(
 
     result = run_check(root, selector=None, dry_run=True)
 
+    assert type(result) is CheckResult
     assert result.dry_run is True
     assert called is False
     assert result.planned_security_sources == ("cisco",)
-    assert result.skills[0].planned_security_sources == ("cisco",)
+    assert type(result.skills[0]) is Skill
     assert result.skills[0].format_status is Severity.PASS
     assert result.skills[0].security_status is None
 
@@ -118,9 +124,12 @@ def test_format_failure_does_not_prevent_independent_security_scan(
     assert scanner.calls[0][0] == (root / "write").resolve()
     assert skill.format_status is Severity.FAIL
     assert skill.security_status is Severity.REVIEW
-    assert [item.code for item in skill.diagnostics] == ["FRONTMATTER_REQUIRED"]
-    assert [item.code for item in skill.findings] == ["CISCO-1"]
+    assert [item.code for item in result.skill_results[0].diagnostics] == [
+        "FRONTMATTER_REQUIRED"
+    ]
+    assert [item.code for item in result.skill_results[0].findings] == ["CISCO-1"]
     assert result.status is CheckStatus.NOT_READY
+    assert result.exit_code == 1
 
 
 def test_scanner_execution_diagnostic_is_associated_with_the_scanned_skill(
@@ -148,11 +157,31 @@ def test_scanner_execution_diagnostic_is_associated_with_the_scanned_skill(
     result = run_check(root, selector=None, dry_run=False)
 
     assert result.skills[0].security_status is Severity.FAIL
-    assert [item.code for item in result.skills[0].diagnostics] == [
+    assert [item.code for item in result.skill_results[0].diagnostics] == [
         "CISCO_PROCESS_FAILED"
     ]
     assert result.diagnostics == ()
     assert result.status is CheckStatus.NOT_READY
+    assert result.exit_code == 2
+
+
+def test_unexpected_scanner_exception_becomes_per_skill_execution_error(
+    plugin_factory,
+    monkeypatch,
+) -> None:
+    root = plugin_factory()
+    monkeypatch.setattr(
+        "skills_eval.service.ScannerRegistry.create",
+        lambda name: RaisingScanner(),
+    )
+
+    result = run_check(root, selector=None, dry_run=False)
+
+    assert result.skills[0].security_status is Severity.FAIL
+    assert [item.code for item in result.skill_results[0].diagnostics] == [
+        "SCANNER_EXECUTION_ERROR"
+    ]
+    assert result.exit_code == 2
 
 
 def test_invalid_configuration_remains_global_while_safe_checks_continue(
@@ -173,10 +202,22 @@ def test_invalid_configuration_remains_global_while_safe_checks_continue(
     result = run_check(root, selector=None, dry_run=False)
 
     assert [item.code for item in result.diagnostics] == ["CONFIG_INVALID"]
-    assert result.skills[0].diagnostics == ()
+    assert result.skill_results[0].diagnostics == ()
     assert result.skills[0].security_status is Severity.PASS
     assert len(scanner.calls) == 1
     assert result.status is CheckStatus.NOT_READY
+    assert result.exit_code == 2
+
+
+def test_selector_error_uses_invocation_exit_code(plugin_factory) -> None:
+    root = plugin_factory()
+
+    result = run_check(root, selector="missing", dry_run=True)
+
+    assert [item.code for item in result.diagnostics] == [
+        "SKILL_SELECTOR_NOT_FOUND"
+    ]
+    assert result.exit_code == 2
 
 
 def test_all_enabled_scanners_run_and_fail_takes_precedence(
@@ -251,9 +292,10 @@ def test_all_enabled_scanners_run_and_fail_takes_precedence(
 
     assert result.planned_security_sources == ("first", "second")
     assert result.skills[0].security_status is Severity.FAIL
-    assert [item.code for item in result.skills[0].findings] == [
+    assert [item.code for item in result.skill_results[0].findings] == [
         "FIRST-1",
         "SECOND-1",
     ]
     assert len(scanners["first"].calls) == 1
     assert len(scanners["second"].calls) == 1
+    assert result.exit_code == 1

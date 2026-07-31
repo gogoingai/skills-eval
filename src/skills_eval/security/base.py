@@ -34,6 +34,10 @@ class ExecutionDiagnostic(Diagnostic):
 
     detail: str = ""
 
+    @property
+    def is_execution_error(self) -> bool:
+        return True
+
 
 @dataclass(frozen=True)
 class ScanOutcome:
