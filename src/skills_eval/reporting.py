@@ -32,6 +32,9 @@ def render_terminal(result: CheckResult) -> str:
                 f"  Security    {_security_status(skill)}",
             )
         )
+    if result.diagnostics:
+        lines.extend(("Repository diagnostics:",))
+        lines.extend(_terminal_diagnostic_line(diagnostic) for diagnostic in result.diagnostics)
     lines.append(f"Result: {result.status.value}")
     if result.dry_run:
         scanners = ", ".join(result.planned_security_sources) or "none"
@@ -75,9 +78,47 @@ def _render_markdown(result: CheckResult, path: Path) -> str:
         f"- Dry run: {'yes' if result.dry_run else 'no'}",
         f"- Report path: {_markdown(path)}",
         "",
-        "## Discovered Skills",
+        "## Inspection scope",
+        "",
+        f"- Target directory: {_markdown(result.root_path) if result.root_path else 'not recorded'}",
+        f"- Requested Skill: {_markdown(result.selector) if result.selector else 'all discovered Skills'}",
+        f"- Skills checked: {len(result.skills)}",
+        "- Security scan scope: each checked Skill directory, recursively.",
+        "",
+        "## Format checks performed",
         "",
     ]
+    if result.format_checks:
+        lines.extend(f"- {_markdown(rule)}" for rule in result.format_checks)
+    else:
+        lines.append("Format check details were not recorded for this run.")
+    lines.extend(
+        (
+            "",
+            "## Per-Skill coverage",
+            "",
+        )
+    )
+    if not result.skills:
+        lines.append("No Skills were selected for checking.")
+    else:
+        for skill in result.skills:
+            lines.extend(
+                (
+                    f"### {_markdown(skill.name)}",
+                    "",
+                    f"- Directory: {_markdown(skill.path)}",
+                    "- Format coverage: SKILL.md, frontmatter, local references, and configured file rules.",
+                    f"- Security coverage: {_security_coverage(result, skill)}",
+                    "",
+                )
+            )
+    lines.extend(
+        (
+            "## Discovered Skills",
+            "",
+        )
+    )
     if not result.skills:
         lines.append("No Skills were discovered.")
     else:
@@ -210,12 +251,31 @@ def _diagnostic_line(diagnostic: Diagnostic) -> str:
     )
 
 
+def _terminal_diagnostic_line(diagnostic: Diagnostic) -> str:
+    location = "" if diagnostic.path is None else f" (path: {diagnostic.path})"
+    return f"- [{diagnostic.severity.value}] {diagnostic.code}: {diagnostic.message}{location}"
+
+
 def _location(path: Path | None) -> str:
     return "" if path is None else f" (path: {_markdown(path)})"
 
 
 def _security_status(skill: Skill) -> str:
     return skill.security_status.value if skill.security_status is not None else "NOT RUN"
+
+
+def _security_coverage(result: CheckResult, skill: Skill) -> str:
+    if result.dry_run:
+        sources = ", ".join(result.planned_security_sources) or "no enabled scanners"
+        return f"not run (dry run; planned: {_markdown(sources)})"
+    sources = ", ".join(
+        str(source.get("name", "unknown"))
+        for source in result.security_sources
+        if _is_enabled(source)
+    )
+    if not sources:
+        return "no enabled scanners"
+    return f"{_markdown(sources)} — {_security_status(skill)}"
 
 
 def _is_enabled(source: Mapping[str, object]) -> bool:

@@ -94,6 +94,8 @@ class SkillResult:
 @dataclass(frozen=True)
 class CheckResult:
     plugin_name: str
+    root_path: Path | None = None
+    selector: str | None = None
     skills: tuple[Skill, ...] = ()
     diagnostics: tuple[Diagnostic, ...] = ()
     findings: tuple[Finding, ...] = ()
@@ -101,6 +103,7 @@ class CheckResult:
     dry_run: bool = False
     planned_security_sources: tuple[str, ...] = ()
     security_sources: tuple[Mapping[str, object], ...] = ()
+    format_checks: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "skills", tuple(self.skills))
@@ -113,6 +116,7 @@ class CheckResult:
             tuple(self.planned_security_sources),
         )
         object.__setattr__(self, "security_sources", tuple(self.security_sources))
+        object.__setattr__(self, "format_checks", tuple(self.format_checks))
 
     @property
     def severity(self) -> Severity:

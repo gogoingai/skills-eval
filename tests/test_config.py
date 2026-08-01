@@ -26,6 +26,20 @@ def test_wenqu_profile_adds_distribution_requirements(tmp_path) -> None:
     assert "slug" in config.required_skill_frontmatter
 
 
+def test_standard_schema_url_is_allowed(tmp_path) -> None:
+    write_config(
+        tmp_path,
+        {
+            "$schema": "https://raw.githubusercontent.com/gogoingai/skills-eval/main/src/skills_eval/schemas/skills-eval.schema.json",
+            "schemaVersion": 1,
+        },
+    )
+
+    _, diagnostics = load_config(tmp_path)
+
+    assert diagnostics == []
+
+
 def test_unknown_security_source_is_a_config_error(tmp_path) -> None:
     write_config(
         tmp_path,

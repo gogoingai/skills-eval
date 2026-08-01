@@ -19,11 +19,36 @@ def test_markdown_report_includes_cisco_disclaimer(sample_result, tmp_path) -> N
     assert "does not guarantee that a Skill is safe" in text
 
 
+def test_markdown_report_describes_scope_and_per_skill_coverage(sample_result, tmp_path) -> None:
+    output = tmp_path / "skills-eval-report.md"
+
+    write_markdown_report(sample_result, output)
+
+    text = output.read_text(encoding="utf-8")
+    assert "## Inspection scope" in text
+    assert "Skills checked: 1" in text
+    assert "## Format checks performed" in text
+    assert "## Per-Skill coverage" in text
+    assert "Security coverage: cisco — REVIEW" in text
+
+
 def test_terminal_summary_uses_requested_status_labels(sample_result) -> None:
     terminal = render_terminal(sample_result)
 
     assert "Format      PASS" in terminal
     assert "Security    REVIEW" in terminal
+
+
+def test_terminal_summary_includes_repository_diagnostics() -> None:
+    result = CheckResult(
+        plugin_name="example",
+        diagnostics=(Diagnostic(Severity.FAIL, "CONFIG_INVALID", "Bad config"),),
+    )
+
+    terminal = render_terminal(result)
+
+    assert "Repository diagnostics:" in terminal
+    assert "[FAIL] CONFIG_INVALID: Bad config" in terminal
 
 
 @pytest.mark.parametrize(
