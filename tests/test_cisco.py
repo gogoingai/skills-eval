@@ -111,6 +111,32 @@ def test_cisco_adapter_passes_when_scanner_reports_no_findings(monkeypatch, tmp_
     assert outcome.diagnostic is None
 
 
+def test_cisco_adapter_excludes_gitignored_files_from_scan_input(monkeypatch, tmp_path) -> None:
+    repository = tmp_path / "plugin"
+    skill_path = repository / "example-skill"
+    ignored_cache = skill_path / "tests" / "__pycache__"
+    ignored_cache.mkdir(parents=True)
+    (repository / ".gitignore").write_text("__pycache__/\n", encoding="utf-8")
+    (skill_path / "SKILL.md").write_text("# Example\n", encoding="utf-8")
+    (ignored_cache / "cached.pyc").write_bytes(b"cache")
+    scanned_paths: list[Path] = []
+
+    def fake_run(args):
+        scanned_path = Path(args[2])
+        scanned_paths.append(scanned_path)
+        assert (scanned_path / "SKILL.md").is_file()
+        assert not (scanned_path / "tests" / "__pycache__").exists()
+        _write_scanner_output(args, {"findings": []})
+        return 0, "", ""
+
+    monkeypatch.setattr("skills_eval.security.cisco.run_scanner", fake_run)
+
+    outcome = CiscoScanner().scan(skill_path, {})
+
+    assert outcome.status is Severity.PASS
+    assert scanned_paths[0] != skill_path
+
+
 def test_cisco_adapter_ignores_magic_mismatch_for_markdown_with_frontmatter(
     monkeypatch, tmp_path
 ) -> None:

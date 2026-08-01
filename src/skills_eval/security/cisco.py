@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -12,6 +14,8 @@ import sys
 import tempfile
 from threading import Lock, Thread
 from typing import Any
+
+import pathspec
 
 from skills_eval.models import Severity, parse_frontmatter
 from skills_eval.security.base import (
@@ -120,40 +124,41 @@ class CiscoScanner:
             ) as output:
                 output_path = Path(output.name)
 
-            args = [
-                _resolve_executable(self.executable),
-                "scan",
-                str(skill_path),
-                "--format",
-                "json",
-                "--output",
-                str(output_path),
-                "--policy",
-                policy,
-            ]
-            if options.get("useBehavioral") is True:
-                args.append("--use-behavioral")
+            with _scan_input_path(skill_path) as scan_path:
+                args = [
+                    _resolve_executable(self.executable),
+                    "scan",
+                    str(scan_path),
+                    "--format",
+                    "json",
+                    "--output",
+                    str(output_path),
+                    "--policy",
+                    policy,
+                ]
+                if options.get("useBehavioral") is True:
+                    args.append("--use-behavioral")
 
-            try:
-                return_code, stdout, stderr = run_scanner(args)
-            except subprocess.TimeoutExpired as error:
-                return _failed(
-                    "CISCO_PROCESS_TIMEOUT",
-                    f"Cisco scanner exceeded the {error.timeout:g}-second execution limit.",
-                    stdout=_output_text(error.stdout),
-                    stderr=_output_text(error.stderr),
-                )
-            except FileNotFoundError:
-                return _failed(
-                    "CISCO_EXECUTABLE_MISSING",
-                    f"Cisco scanner executable was not found: {self.executable!r}.",
-                )
-            except OSError as error:
-                return _failed(
-                    "CISCO_PROCESS_ERROR",
-                    "Cisco scanner could not be started.",
-                    error=str(error),
-                )
+                try:
+                    return_code, stdout, stderr = run_scanner(args)
+                except subprocess.TimeoutExpired as error:
+                    return _failed(
+                        "CISCO_PROCESS_TIMEOUT",
+                        f"Cisco scanner exceeded the {error.timeout:g}-second execution limit.",
+                        stdout=_output_text(error.stdout),
+                        stderr=_output_text(error.stderr),
+                    )
+                except FileNotFoundError:
+                    return _failed(
+                        "CISCO_EXECUTABLE_MISSING",
+                        f"Cisco scanner executable was not found: {self.executable!r}.",
+                    )
+                except OSError as error:
+                    return _failed(
+                        "CISCO_PROCESS_ERROR",
+                        "Cisco scanner could not be started.",
+                        error=str(error),
+                    )
 
             if return_code != 0:
                 return _failed(
@@ -261,6 +266,52 @@ def _resolve_executable(executable: str) -> str:
         return executable
     bundled = Path(sys.executable).parent / executable
     return str(bundled) if bundled.is_file() else executable
+
+
+@contextmanager
+def _scan_input_path(skill_path: Path) -> Iterator[Path]:
+    """Yield a scan directory excluding the nearest repository's ignored paths."""
+    ignore_root = _find_gitignore_root(skill_path)
+    if ignore_root is None:
+        yield skill_path
+        return
+
+    lines = (ignore_root / ".gitignore").read_text(encoding="utf-8").splitlines()
+    spec = pathspec.GitIgnoreSpec.from_lines(lines)
+    with tempfile.TemporaryDirectory(prefix="skills-eval-cisco-input-") as directory:
+        staged_path = Path(directory) / "skill"
+        shutil.copytree(
+            skill_path,
+            staged_path,
+            symlinks=True,
+            ignore=_gitignore_copy_filter(ignore_root, spec),
+        )
+        yield staged_path
+
+
+def _find_gitignore_root(path: Path) -> Path | None:
+    for candidate in (path, *path.parents):
+        if (candidate / ".gitignore").is_file():
+            return candidate
+    return None
+
+
+def _gitignore_copy_filter(
+    root: Path, spec: pathspec.GitIgnoreSpec
+) -> Callable[[str, list[str]], set[str]]:
+    def ignored_names(directory: str, names: list[str]) -> set[str]:
+        relative_directory = Path(directory).resolve().relative_to(root.resolve())
+        ignored: set[str] = set()
+        for name in names:
+            candidate = Path(directory) / name
+            relative_path = (relative_directory / name).as_posix()
+            if candidate.is_dir():
+                relative_path += "/"
+            if spec.match_file(relative_path):
+                ignored.add(name)
+        return ignored
+
+    return ignored_names
 
 
 def _normalize_findings(payload: Any) -> tuple[SecurityFinding, ...]:
