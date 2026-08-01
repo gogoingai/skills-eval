@@ -17,7 +17,7 @@ inputs:
   version:
     description: PyPI requirement used to run Skills Eval.
     required: false
-    default: skills-eval>=0.1.7,<0.2
+    default: skills-eval>=0.1.8,<0.2
   comment:
     description: Update one summary comment when the workflow runs for a pull request.
     required: false
@@ -107,6 +107,24 @@ runs:
             ? `${runUrl}/artifacts/${artifact.id}`
             : runUrl;
           const report = fs.readFileSync(reportPath, "utf8").trim();
+          const chineseReport = report.includes("# Skills 审查报告");
+          const labels = chineseReport
+            ? {
+                title: "Skills Eval 审查结果",
+                commit: "最新提交",
+                completed: "审查完成",
+                updates: "此评论会随 PR 后续提交原地更新。",
+                download: "下载完整报告",
+                view: "查看本次运行",
+              }
+            : {
+                title: "Skills Eval review",
+                commit: "Latest commit",
+                completed: "Completed",
+                updates: "This comment updates in place after each new commit to this pull request.",
+                download: "Download full report",
+                view: "View workflow run",
+              };
           const maxReportLength = 55000;
           const displayedReport = report.length > maxReportLength
             ? `${report.slice(0, maxReportLength)}\n\n_报告过长，完整内容请下载附件。_`
@@ -115,16 +133,16 @@ runs:
             marker,
             "> 🤖 **Powered by [Skills Eval](https://github.com/gogoingai/skills-eval)** — an open-source pre-release reviewer for multi-Skill Claude Plugins.",
             "",
-            "## Skills Eval 审查结果",
+            `## ${labels.title}`,
             "",
-            `> 最新提交：[\`${shortSha}\`](${headUrl})`,
-            `> 审查完成：<t:${checkedAt}:F> · [查看本次运行](${runUrl})`,
-            "> _This comment updates in place after each new commit to this pull request._",
+            `> ${labels.commit}：[\`${shortSha}\`](${headUrl})`,
+            `> ${labels.completed}：<t:${checkedAt}:F> · [${labels.view}](${runUrl})`,
+            `> _${labels.updates}_`,
             "",
             displayedReport,
             "",
             "---",
-            `[下载完整报告](${artifactUrl})`,
+            `[${labels.download}](${artifactUrl})`,
           ].join("\n");
           const comments = await github.paginate(github.rest.issues.listComments, {
             owner,

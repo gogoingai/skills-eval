@@ -11,7 +11,7 @@ def test_action_installs_requested_cli_and_uploads_report() -> None:
 
     assert action["runs"]["using"] == "composite"
     assert action["inputs"]["path"]["default"] == "."
-    assert action["inputs"]["version"]["default"] == "skills-eval>=0.1.7,<0.2"
+    assert action["inputs"]["version"]["default"] == "skills-eval>=0.1.8,<0.2"
     assert action["outputs"]["report-path"]
     assert any(step.get("uses") == "actions/setup-python@v5" for step in action["runs"]["steps"])
     assert any(step.get("uses") == "actions/upload-artifact@v4" for step in action["runs"]["steps"])
@@ -42,7 +42,8 @@ def test_action_updates_one_pr_comment_after_uploading_the_report() -> None:
     assert "issues.createComment" in comment_step["with"]["script"]
     assert "Powered by [Skills Eval]" in comment_step["with"]["script"]
     assert "pull_request.head.sha" in comment_step["with"]["script"]
-    assert "updates in place" in comment_step["with"]["script"]
+    assert "此评论会随 PR 后续提交原地更新" in comment_step["with"]["script"]
+    assert "This comment updates in place" in comment_step["with"]["script"]
     assert comment_step["with"]["github-token"] == "${{ github.token }}"
     assert comment_step["continue-on-error"] is True
 
@@ -50,6 +51,6 @@ def test_action_updates_one_pr_comment_after_uploading_the_report() -> None:
 def test_readme_documents_reusable_github_action() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "uses: gogoingai/skills-eval@v0.1.7" in readme
+    assert "uses: gogoingai/skills-eval@v0.1.8" in readme
     assert "pull-requests: write" in readme
     assert "automatic\n`GITHUB_TOKEN`" in readme
