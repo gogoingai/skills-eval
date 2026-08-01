@@ -67,6 +67,12 @@ def write_markdown_report(result: CheckResult, path: Path) -> None:
 
 
 def _render_markdown(result: CheckResult, path: Path) -> str:
+    if result.report_language == "en":
+        return _render_markdown_en(result, path)
+    return _render_markdown_zh(result, path)
+
+
+def _render_markdown_zh(result: CheckResult, path: Path) -> str:
     lines = [
         "# Skills 审查报告",
         "",
@@ -74,12 +80,12 @@ def _render_markdown(result: CheckResult, path: Path) -> str:
         "",
         f"- 插件：{_markdown(result.plugin_name)}",
         f"- 审查结果：{result.status.value}",
-        f"- 发布建议：{_release_recommendation(result)}",
+        f"- 发布建议：{_release_recommendation(result, 'zh')}",
         f"- 演练模式：{'是（未执行安全扫描）' if result.dry_run else '否'}",
         "",
         "## 一句话总结",
         "",
-        *_plain_summary(result),
+        *_plain_summary(result, "zh"),
         "",
         "## 审查范围",
         "",
@@ -112,7 +118,7 @@ def _render_markdown(result: CheckResult, path: Path) -> str:
                     "",
                     f"- 目录：{_markdown(skill.path)}",
                     "- 格式：SKILL.md、frontmatter、本地引用和已配置的文件规则。",
-                    f"- 安全：{_security_coverage(result, skill)}",
+                    f"- 安全：{_security_coverage(result, skill, 'zh')}",
                     "",
                 )
             )
@@ -158,10 +164,84 @@ def _render_markdown(result: CheckResult, path: Path) -> str:
 
     format_diagnostics, security_diagnostics = _group_diagnostics(result)
     lines.extend(("## 格式问题", ""))
-    _append_grouped_diagnostics(lines, format_diagnostics)
+    _append_grouped_diagnostics(lines, format_diagnostics, "zh")
     lines.extend(("", "## 安全问题", ""))
-    _append_security_details(lines, result, security_diagnostics)
+    _append_security_details(lines, result, security_diagnostics, "zh")
     lines.extend(("", "## Cisco 扫描器说明", "", _CISCO_DISCLAIMER, ""))
+    return "\n".join(lines)
+
+
+def _render_markdown_en(result: CheckResult, path: Path) -> str:
+    lines = [
+        "# Skills evaluation report",
+        "",
+        "## Result",
+        "",
+        f"- Plugin: {_markdown(result.plugin_name)}",
+        f"- Status: {result.status.value}",
+        f"- Release recommendation: {_release_recommendation(result, 'en')}",
+        f"- Dry run: {'yes (security scanners were not run)' if result.dry_run else 'no'}",
+        "",
+        "## At a glance",
+        "",
+        *_plain_summary(result, "en"),
+        "",
+        "## Inspection scope",
+        "",
+        f"- Target directory: {_markdown(result.root_path) if result.root_path else 'not recorded'}",
+        f"- Requested Skill: {_markdown(result.selector) if result.selector else 'all discovered Skills'}",
+        f"- Skills checked: {len(result.skills)}",
+        "- Security scan scope: each checked Skill directory, recursively.",
+        "",
+        "## Format checks performed",
+        "",
+    ]
+    if result.format_checks:
+        lines.extend(f"- {_markdown(rule)}" for rule in result.format_checks)
+    else:
+        lines.append("Format check details were not recorded for this run.")
+
+    lines.extend(("", "## Skill results", ""))
+    if not result.skills:
+        lines.append("No Skills were selected for checking.")
+    else:
+        for skill in result.skills:
+            lines.extend(
+                (
+                    f"### {_markdown(skill.name)}",
+                    "",
+                    f"- Directory: {_markdown(skill.path)}",
+                    f"- Format: {skill.format_status.value}",
+                    f"- Security: {_security_coverage(result, skill, 'en')}",
+                    "",
+                )
+            )
+
+    lines.extend(("## Enabled security scanners", ""))
+    sources = tuple(source for source in result.security_sources if _is_enabled(source))
+    if not sources:
+        lines.append("No security scanners are enabled.")
+    else:
+        for source in sources:
+            name = source.get("name", "unknown")
+            options = source.get("options", {})
+            lines.append(f"- {_markdown(name)}: {_markdown(_json(options))}")
+    lines.append("")
+
+    format_diagnostics, security_diagnostics = _group_diagnostics(result)
+    lines.extend(("## Format diagnostics", ""))
+    _append_grouped_diagnostics(lines, format_diagnostics, "en")
+    lines.extend(("", "## Security findings", ""))
+    _append_security_details(lines, result, security_diagnostics, "en")
+    lines.extend(
+        (
+            "",
+            "## Cisco scanner disclaimer",
+            "",
+            "Cisco AI Skill Scanner is a best-effort tool and does not guarantee that a Skill is safe.",
+            "",
+        )
+    )
     return "\n".join(lines)
 
 
@@ -181,10 +261,10 @@ def _group_diagnostics(
 
 
 def _append_grouped_diagnostics(
-    lines: list[str], diagnostics: dict[str, list[Diagnostic]]
+    lines: list[str], diagnostics: dict[str, list[Diagnostic]], language: str
 ) -> None:
     if not diagnostics:
-        lines.append("未发现格式问题。")
+        lines.append("No format diagnostics." if language == "en" else "未发现格式问题。")
         return
     for group, group_diagnostics in diagnostics.items():
         lines.extend((f"### {_markdown(group)}", ""))
@@ -195,7 +275,7 @@ def _append_grouped_diagnostics(
 
 
 def _append_security_details(
-    lines: list[str], result: CheckResult, diagnostics: dict[str, list[Diagnostic]]
+    lines: list[str], result: CheckResult, diagnostics: dict[str, list[Diagnostic]], language: str
 ) -> None:
     result_by_path = {skill_result.skill.path: skill_result for skill_result in result.skill_results}
     has_content = False
@@ -210,37 +290,47 @@ def _append_security_details(
         for diagnostic in skill_diagnostics:
             lines.append(_diagnostic_line(diagnostic))
         for finding in findings:
-            _append_finding(lines, finding)
+            _append_finding(lines, finding, language)
         lines.append("")
 
     repository_diagnostics = diagnostics.get("Repository", [])
     if repository_diagnostics:
         has_content = True
-        lines.extend(("### 仓库级问题", ""))
+        lines.extend((("### Repository" if language == "en" else "### 仓库级问题"), ""))
         for diagnostic in repository_diagnostics:
             lines.append(_diagnostic_line(diagnostic))
         lines.append("")
 
     if not has_content:
-        lines.append("未发现安全问题。")
+        lines.append("No security findings." if language == "en" else "未发现安全问题。")
     elif lines[-1] == "":
         lines.pop()
 
 
-def _append_finding(lines: list[str], finding: Finding) -> None:
+def _append_finding(lines: list[str], finding: Finding, language: str) -> None:
     lines.append(
         f"- [{finding.severity.value}] {_markdown(finding.code)}: "
-        f"{_markdown(_finding_summary(finding))}{_location(finding.path)}"
+        f"{_markdown(_finding_summary(finding, language))}{_location(finding.path)}"
     )
     if isinstance(finding, SecurityFinding):
         details = (
-            ("来源", finding.source),
-            ("规则", finding.rule_id),
-            ("来源等级", finding.source_severity),
-            ("行号", finding.line),
-            ("原始详情", finding.detail),
-            ("原始建议", finding.remediation),
-            ("原始证据", finding.evidence),
+            *((
+                ("Source", finding.source),
+                ("Rule", finding.rule_id),
+                ("Source severity", finding.source_severity),
+                ("Line", finding.line),
+                ("Detail", finding.detail),
+                ("Remediation", finding.remediation),
+                ("Evidence", finding.evidence),
+            ) if language == "en" else (
+                ("来源", finding.source),
+                ("规则", finding.rule_id),
+                ("来源等级", finding.source_severity),
+                ("行号", finding.line),
+                ("原始详情", finding.detail),
+                ("原始建议", finding.remediation),
+                ("原始证据", finding.evidence),
+            )),
         )
         for label, value in details:
             if value is not None and value != "":
@@ -267,21 +357,25 @@ def _security_status(skill: Skill) -> str:
     return skill.security_status.value if skill.security_status is not None else "NOT RUN"
 
 
-def _security_coverage(result: CheckResult, skill: Skill) -> str:
+def _security_coverage(result: CheckResult, skill: Skill, language: str) -> str:
     if result.dry_run:
-        sources = ", ".join(result.planned_security_sources) or "没有启用扫描器"
-        return f"未执行（演练模式；计划使用：{_markdown(sources)}）"
+        sources = ", ".join(result.planned_security_sources)
+        if language == "en":
+            return f"not run (dry run; planned: {_markdown(sources or 'no enabled scanners')})"
+        return f"未执行（演练模式；计划使用：{_markdown(sources or '没有启用扫描器')}）"
     sources = ", ".join(
         str(source.get("name", "unknown"))
         for source in result.security_sources
         if _is_enabled(source)
     )
     if not sources:
-        return "没有启用扫描器"
+        return "no enabled scanners" if language == "en" else "没有启用扫描器"
     return f"{_markdown(sources)} — {_security_status(skill)}"
 
 
-def _finding_summary(finding: Finding) -> str:
+def _finding_summary(finding: Finding, language: str) -> str:
+    if language == "en":
+        return finding.message
     summaries = {
         "FILE_MAGIC_MISMATCH": "文件扩展名与扫描器识别的内容类型不一致，需要人工确认。",
         "PYCACHE_FILES_DETECTED": "发现 Python 缓存文件，不应随 Skill 一起发布。",
@@ -289,23 +383,43 @@ def _finding_summary(finding: Finding) -> str:
     return summaries.get(finding.code, finding.message)
 
 
-def _release_recommendation(result: CheckResult) -> str:
+def _release_recommendation(result: CheckResult, language: str) -> str:
     if result.status.value == "READY":
-        return "可以发布"
+        return "ready to publish" if language == "en" else "可以发布"
     if result.status.value == "READY WITH WARNINGS":
-        return "可以发布，但请先查看“安全问题”中的 REVIEW 项"
-    return "暂不建议发布；请先处理“格式问题”或“安全问题”"
+        return (
+            "ready to publish, but review the REVIEW items first"
+            if language == "en"
+            else "可以发布，但请先查看“安全问题”中的 REVIEW 项"
+        )
+    return (
+        "not ready to publish; resolve format or security findings first"
+        if language == "en"
+        else "暂不建议发布；请先处理“格式问题”或“安全问题”"
+    )
 
 
-def _plain_summary(result: CheckResult) -> tuple[str, str]:
+def _plain_summary(result: CheckResult, language: str) -> tuple[str, str]:
     format_failures = [skill.name for skill in result.skills if skill.format_status is Severity.FAIL]
     if format_failures:
-        format_summary = f"- 格式：{', '.join(format_failures)} 未通过，需要修复。"
+        format_summary = (
+            f"- Format: {', '.join(format_failures)} did not pass and needs attention."
+            if language == "en"
+            else f"- 格式：{', '.join(format_failures)} 未通过，需要修复。"
+        )
     else:
-        format_summary = "- 格式：所有已检查的 Skill 均通过。"
+        format_summary = (
+            "- Format: every checked Skill passed."
+            if language == "en"
+            else "- 格式：所有已检查的 Skill 均通过。"
+        )
 
     if result.dry_run:
-        security_summary = "- 安全：演练模式，尚未执行安全扫描。"
+        security_summary = (
+            "- Security: dry run; security scanners were not run."
+            if language == "en"
+            else "- 安全：演练模式，尚未执行安全扫描。"
+        )
     else:
         reviews = [
             skill.name
@@ -316,11 +430,23 @@ def _plain_summary(result: CheckResult) -> tuple[str, str]:
             skill.name for skill in result.skills if skill.security_status is Severity.FAIL
         ]
         if failures:
-            security_summary = f"- 安全：{', '.join(failures)} 未通过，需要修复。"
+            security_summary = (
+                f"- Security: {', '.join(failures)} did not pass and needs attention."
+                if language == "en"
+                else f"- 安全：{', '.join(failures)} 未通过，需要修复。"
+            )
         elif reviews:
-            security_summary = f"- 安全：{', '.join(reviews)} 需要人工确认；其余通过。"
+            security_summary = (
+                f"- Security: {', '.join(reviews)} needs review; all others passed."
+                if language == "en"
+                else f"- 安全：{', '.join(reviews)} 需要人工确认；其余通过。"
+            )
         else:
-            security_summary = "- 安全：所有已检查的 Skill 均通过。"
+            security_summary = (
+                "- Security: every checked Skill passed."
+                if language == "en"
+                else "- 安全：所有已检查的 Skill 均通过。"
+            )
     return format_summary, security_summary
 
 

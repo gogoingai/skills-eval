@@ -8,6 +8,7 @@ from pathlib import Path
 from skills_eval.config import EvalConfig, load_config
 from skills_eval.discovery import discover_plugin, select_skill
 from skills_eval.format_checks import check_format
+from skills_eval.localization import resolve_report_language
 from skills_eval.models import (
     CheckResult,
     Diagnostic,
@@ -34,13 +35,15 @@ def run_check(root: Path, selector: str | None, dry_run: bool) -> CheckResult:
     global_diagnostics = [*config_diagnostics, *discovery_diagnostics]
     enabled_sources = _enabled_sources(config)
     planned_sources = tuple(_source_name(source) for source in enabled_sources)
-    format_rules = _format_rules(config)
+    report_language = resolve_report_language(getattr(config, "report_language", "auto"))
+    format_rules = _format_rules(config, report_language)
 
     if plugin is None:
         return CheckResult(
             plugin_name=root.name,
             root_path=root,
             selector=selector,
+            report_language=report_language,
             diagnostics=tuple(global_diagnostics),
             dry_run=dry_run,
             planned_security_sources=planned_sources,
@@ -129,6 +132,7 @@ def run_check(root: Path, selector: str | None, dry_run: bool) -> CheckResult:
         plugin_name=plugin.name,
         root_path=root,
         selector=selector,
+        report_language=report_language,
         skills=tuple(checked_skills),
         diagnostics=tuple(global_diagnostics),
         skill_results=tuple(skill_results),
@@ -157,8 +161,23 @@ def _source_options(source: Mapping[str, object]) -> dict[str, object]:
     return dict(options)
 
 
-def _format_rules(config: EvalConfig) -> tuple[str, ...]:
+def _format_rules(config: EvalConfig, language: str) -> tuple[str, ...]:
     """Describe exactly which format checks this configuration enables."""
+    if language == "en":
+        rules = [
+            "Claude Plugin manifest validity and declared Skill discovery",
+            "Unique Skill names and non-conflicting declared Skill paths",
+            "SKILL.md presence, YAML frontmatter, and required fields",
+            "Local file references within the selected Skill directories",
+            "Configured temporary or forbidden files",
+        ]
+        if config.require_marketplace_metadata:
+            rules.append("Wenqu release metadata consistency")
+        if config.require_openclaw_metadata:
+            rules.append("OpenClaw homepage metadata")
+        if config.require_image_references:
+            rules.append("Wenqu image asset references")
+        return tuple(rules)
     rules = [
         "Claude Plugin 清单有效性和已声明 Skill 的识别",
         "Skill 名称唯一性与声明路径冲突",

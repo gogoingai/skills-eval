@@ -108,6 +108,21 @@ def test_supported_cisco_options_are_preserved(tmp_path) -> None:
     )
 
 
+def test_report_language_can_be_configured(tmp_path) -> None:
+    write_config(
+        tmp_path,
+        {
+            "schemaVersion": 1,
+            "report": {"language": "en"},
+        },
+    )
+
+    config, diagnostics = load_config(tmp_path)
+
+    assert diagnostics == []
+    assert config.report_language == "en"
+
+
 def test_unknown_cisco_option_is_a_config_error(tmp_path) -> None:
     write_config(
         tmp_path,

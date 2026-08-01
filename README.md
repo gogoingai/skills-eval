@@ -48,6 +48,9 @@ through the GitHub-hosted schema URL:
   "$schema": "https://raw.githubusercontent.com/gogoingai/skills-eval/main/src/skills_eval/schemas/skills-eval.schema.json",
   "schemaVersion": 1,
   "extends": ["wenqu"],
+  "report": {
+    "language": "auto"
+  },
   "security": {
     "sources": [
       {
@@ -66,6 +69,10 @@ through the GitHub-hosted schema URL:
 The `wenqu` profile adds Wenqu-specific release metadata, OpenClaw homepage,
 and image-asset checks. Security sources are a configured list so future
 scanners can be added without changing the command interface.
+
+`report.language` accepts `auto` (the default), `zh`, or `en`. In `auto` mode,
+Skills Eval reads the computer's preferred language: Chinese preferences render
+the report in Chinese; every other preference renders it in English.
 
 ## Release automation
 

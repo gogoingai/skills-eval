@@ -38,6 +38,13 @@
           "items": { "$ref": "#/$defs/securitySource" }
         }
       }
+    },
+    "report": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "language": { "enum": ["auto", "zh", "en"] }
+      }
     }
   },
   "$defs": {

@@ -34,6 +34,28 @@ def test_markdown_report_describes_scope_and_per_skill_coverage(sample_result, t
     assert "安全：write 需要人工确认；其余通过。" in text
 
 
+def test_markdown_report_renders_english_when_requested(tmp_path) -> None:
+    skill = Skill(
+        name="write",
+        path=Path("skills/write"),
+        format_status=Severity.PASS,
+        security_status=Severity.PASS,
+    )
+    result = CheckResult(
+        plugin_name="example-plugin",
+        report_language="en",
+        skills=(skill,),
+    )
+    output = tmp_path / "report.md"
+
+    write_markdown_report(result, output)
+
+    text = output.read_text(encoding="utf-8")
+    assert "# Skills evaluation report" in text
+    assert "Release recommendation: ready to publish" in text
+    assert "## Inspection scope" in text
+
+
 def test_terminal_summary_uses_requested_status_labels(sample_result) -> None:
     terminal = render_terminal(sample_result)
 

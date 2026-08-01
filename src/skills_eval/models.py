@@ -96,6 +96,7 @@ class CheckResult:
     plugin_name: str
     root_path: Path | None = None
     selector: str | None = None
+    report_language: str = "en"
     skills: tuple[Skill, ...] = ()
     diagnostics: tuple[Diagnostic, ...] = ()
     findings: tuple[Finding, ...] = ()

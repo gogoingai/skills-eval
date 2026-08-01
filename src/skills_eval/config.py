@@ -38,6 +38,7 @@ _PORTABLE_FORMAT: dict[str, object] = {
     "requireImageReferences": False,
 }
 _DEFAULT_SOURCES = [{"name": "cisco", "enabled": True}]
+_DEFAULT_REPORT_LANGUAGE = "auto"
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,7 @@ class EvalConfig:
     forbidden_paths: tuple[str, ...]
     reference_extensions: tuple[str, ...]
     security_sources: tuple[Mapping[str, object], ...]
+    report_language: str = _DEFAULT_REPORT_LANGUAGE
     require_marketplace_metadata: bool = False
     require_openclaw_metadata: bool = False
     require_image_references: bool = False
@@ -102,7 +104,12 @@ def load_config(root: Path) -> tuple[EvalConfig, list[Diagnostic]]:
     if unknown_sources:
         return _portable_with_error(config_path, f"Unknown security source: {unknown_sources[0]!r}.")
 
-    return _resolved_config(format_config, sources), []
+    report = raw_config.get("report", {})
+    assert isinstance(report, dict)
+    report_language = report.get("language", _DEFAULT_REPORT_LANGUAGE)
+    assert isinstance(report_language, str)
+
+    return _resolved_config(format_config, sources, report_language), []
 
 
 def _validator() -> Draft202012Validator:
@@ -116,7 +123,11 @@ def _load_profile(name: str) -> dict[str, object]:
     return json.loads(resources.files("skills_eval").joinpath(_PROFILE_RESOURCE).read_text(encoding="utf-8"))
 
 
-def _resolved_config(format_config: Mapping[str, object], sources: list[object]) -> EvalConfig:
+def _resolved_config(
+    format_config: Mapping[str, object],
+    sources: list[object],
+    report_language: str = _DEFAULT_REPORT_LANGUAGE,
+) -> EvalConfig:
     frozen_sources = tuple(_freeze_mapping(source) for source in sources)
     return EvalConfig(
         required_root_files=tuple(format_config["requiredRootFiles"]),
@@ -124,6 +135,7 @@ def _resolved_config(format_config: Mapping[str, object], sources: list[object])
         forbidden_paths=tuple(format_config["forbiddenPaths"]),
         reference_extensions=tuple(format_config["referenceExtensions"]),
         security_sources=frozen_sources,
+        report_language=report_language,
         require_marketplace_metadata=bool(format_config["requireMarketplaceMetadata"]),
         require_openclaw_metadata=bool(format_config["requireOpenClawMetadata"]),
         require_image_references=bool(format_config["requireImageReferences"]),

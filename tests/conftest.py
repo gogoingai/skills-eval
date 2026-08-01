@@ -97,6 +97,7 @@ def sample_result() -> CheckResult:
     )
     return CheckResult(
         plugin_name="example-plugin",
+        report_language="zh",
         skills=(skill,),
         skill_results=(SkillResult(skill=skill, findings=(finding,)),),
         security_sources=(
