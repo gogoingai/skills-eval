@@ -11,7 +11,7 @@ import tempfile
 from threading import Lock, Thread
 from typing import Any
 
-from skills_eval.models import Severity
+from skills_eval.models import Severity, parse_frontmatter
 from skills_eval.security.base import (
     ExecutionDiagnostic,
     ScanOutcome,
@@ -218,6 +218,7 @@ class CiscoScanner:
                     stderr=stderr,
                 )
 
+            findings = _filter_markdown_magic_mismatches(findings, skill_path)
             status = _outcome_status(findings)
             return ScanOutcome(status=status, findings=findings)
         except OSError as error:
@@ -308,6 +309,35 @@ def _normalize_findings(payload: Any) -> tuple[SecurityFinding, ...]:
             )
         )
     return tuple(findings)
+
+
+def _filter_markdown_magic_mismatches(
+    findings: tuple[SecurityFinding, ...], skill_path: Path
+) -> tuple[SecurityFinding, ...]:
+    """Drop Cisco's isolated type warning for valid Markdown frontmatter.
+
+    Cisco's Magika classifier can label a Markdown document as YAML when its
+    frontmatter or embedded YAML examples dominate. The warning is suppressed
+    only if it is the sole rule reported and every referenced file is valid
+    Markdown with mapping YAML frontmatter.
+    """
+    if not findings or any(finding.code != "FILE_MAGIC_MISMATCH" for finding in findings):
+        return findings
+    if all(_is_markdown_with_frontmatter(finding.path, skill_path) for finding in findings):
+        return ()
+    return findings
+
+
+def _is_markdown_with_frontmatter(path: Path | None, skill_path: Path) -> bool:
+    if path is None or path.suffix.lower() != ".md":
+        return False
+    candidate = path if path.is_absolute() else skill_path / path
+    try:
+        candidate = candidate.resolve(strict=True)
+        candidate.relative_to(skill_path.resolve(strict=True))
+        return parse_frontmatter(candidate.read_text(encoding="utf-8")) is not None
+    except (OSError, UnicodeDecodeError, ValueError):
+        return False
 
 
 def _nonempty_string(value: object) -> str | None:

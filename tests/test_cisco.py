@@ -111,6 +111,95 @@ def test_cisco_adapter_passes_when_scanner_reports_no_findings(monkeypatch, tmp_
     assert outcome.diagnostic is None
 
 
+def test_cisco_adapter_ignores_magic_mismatch_for_markdown_with_frontmatter(
+    monkeypatch, tmp_path
+) -> None:
+    (tmp_path / "SKILL.md").write_text(
+        "---\nname: example\ndescription: Example\n---\n\n# Example\n",
+        encoding="utf-8",
+    )
+    payload = {
+        "findings": [
+            {
+                "rule_id": "FILE_MAGIC_MISMATCH",
+                "severity": "medium",
+                "message": "File extension does not match actual content type",
+                "file_path": "SKILL.md",
+            }
+        ]
+    }
+
+    def fake_run(args):
+        _write_scanner_output(args, payload)
+        return 0, "", ""
+
+    monkeypatch.setattr("skills_eval.security.cisco.run_scanner", fake_run)
+
+    outcome = CiscoScanner().scan(tmp_path, {})
+
+    assert outcome.status is Severity.PASS
+    assert outcome.findings == ()
+
+
+def test_cisco_adapter_keeps_magic_mismatch_when_other_findings_exist(monkeypatch, tmp_path) -> None:
+    (tmp_path / "SKILL.md").write_text(
+        "---\nname: example\ndescription: Example\n---\n\n# Example\n",
+        encoding="utf-8",
+    )
+    payload = {
+        "findings": [
+            {
+                "rule_id": "FILE_MAGIC_MISMATCH",
+                "severity": "medium",
+                "message": "File extension does not match actual content type",
+                "file_path": "SKILL.md",
+            },
+            {
+                "rule_id": "PI-001",
+                "severity": "medium",
+                "message": "Injected instruction",
+                "file_path": "SKILL.md",
+            },
+        ]
+    }
+
+    def fake_run(args):
+        _write_scanner_output(args, payload)
+        return 0, "", ""
+
+    monkeypatch.setattr("skills_eval.security.cisco.run_scanner", fake_run)
+
+    outcome = CiscoScanner().scan(tmp_path, {})
+
+    assert outcome.status is Severity.REVIEW
+    assert [finding.code for finding in outcome.findings] == ["FILE_MAGIC_MISMATCH", "PI-001"]
+
+
+def test_cisco_adapter_keeps_magic_mismatch_without_valid_frontmatter(monkeypatch, tmp_path) -> None:
+    (tmp_path / "SKILL.md").write_text("name: disguised YAML\n", encoding="utf-8")
+    payload = {
+        "findings": [
+            {
+                "rule_id": "FILE_MAGIC_MISMATCH",
+                "severity": "medium",
+                "message": "File extension does not match actual content type",
+                "file_path": "SKILL.md",
+            }
+        ]
+    }
+
+    def fake_run(args):
+        _write_scanner_output(args, payload)
+        return 0, "", ""
+
+    monkeypatch.setattr("skills_eval.security.cisco.run_scanner", fake_run)
+
+    outcome = CiscoScanner().scan(tmp_path, {})
+
+    assert outcome.status is Severity.REVIEW
+    assert [finding.code for finding in outcome.findings] == ["FILE_MAGIC_MISMATCH"]
+
+
 def test_cisco_adapter_uses_supported_options_and_deletes_temporary_output(
     monkeypatch, tmp_path
 ) -> None:
