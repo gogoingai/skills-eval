@@ -131,6 +131,7 @@ def test_reports_external_publishing_validation_separately_from_security(tmp_pat
         plugin_name="example",
         report_language="zh",
         external_checks_requested=True,
+        requested_external_targets=("claude-plugin", "workbuddy", "clawhub"),
         publishing_checks=(
             PublishingCheckResult(
                 target="skillhub",
@@ -151,11 +152,14 @@ def test_reports_external_publishing_validation_separately_from_security(tmp_pat
 
     text = output.read_text(encoding="utf-8")
     assert "## 外部发布校验" in text
+    assert "本次执行目标：claude-plugin、workbuddy、clawhub。" in text
     assert "[PASS] skillhub" in text
     assert "[FAIL] clawhub" in text
     assert "## 安全问题" in text
     assert "clawhub" not in text.split("## 安全问题", 1)[1]
-    assert "External publishing checks:" in render_terminal(result)
+    terminal = render_terminal(result)
+    assert "External publishing checks:" in terminal
+    assert "Requested targets: claude-plugin, workbuddy, clawhub" in terminal
 
 
 @pytest.mark.parametrize(

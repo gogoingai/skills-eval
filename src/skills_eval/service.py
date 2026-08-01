@@ -28,7 +28,11 @@ from skills_eval.security import (
 
 
 def run_check(
-    root: Path, selector: str | None, dry_run: bool, external: bool = False
+    root: Path,
+    selector: str | None,
+    dry_run: bool,
+    external: bool = False,
+    external_targets: tuple[str, ...] = (),
 ) -> CheckResult:
     """Run configured format and security checks in deterministic order."""
     root = root.resolve()
@@ -38,6 +42,10 @@ def run_check(
     global_diagnostics = [*config_diagnostics, *discovery_diagnostics]
     enabled_sources = _enabled_sources(config)
     enabled_publishing_targets = _enabled_publishing_targets(config)
+    selected_publishing_targets, target_diagnostics = _select_publishing_targets(
+        enabled_publishing_targets, external_targets
+    )
+    global_diagnostics.extend(target_diagnostics)
     planned_sources = tuple(_source_name(source) for source in enabled_sources)
     report_language = resolve_report_language(getattr(config, "report_language", "auto"))
     format_rules = _format_rules(config, report_language)
@@ -54,7 +62,8 @@ def run_check(
             security_sources=enabled_sources,
             publishing_targets=enabled_publishing_targets,
             format_checks=format_rules,
-            external_checks_requested=external,
+            external_checks_requested=external or bool(external_targets),
+            requested_external_targets=external_targets,
         )
 
     selected_skills, selection_diagnostics = select_skill(plugin, selector)
@@ -69,9 +78,9 @@ def run_check(
     publishing_checks = run_publishing_checks(
         root,
         tuple(selected_skills),
-        enabled_publishing_targets,
+        selected_publishing_targets,
         dry_run=dry_run,
-        requested=external,
+        requested=external or bool(external_targets),
     )
 
     scanner_entries: list[tuple[str, SecurityScanner, dict[str, object]]] = []
@@ -156,7 +165,8 @@ def run_check(
         publishing_targets=enabled_publishing_targets,
         format_checks=format_rules,
         publishing_checks=publishing_checks,
-        external_checks_requested=external,
+        external_checks_requested=external or bool(external_targets),
+        requested_external_targets=external_targets,
     )
 
 
@@ -172,6 +182,32 @@ def _enabled_publishing_targets(config: EvalConfig) -> tuple[Mapping[str, object
         for target in getattr(config, "publishing_targets", ())
         if target.get("enabled") is True
     )
+
+
+def _select_publishing_targets(
+    enabled_targets: tuple[Mapping[str, object], ...],
+    requested_targets: tuple[str, ...],
+) -> tuple[tuple[Mapping[str, object], ...], tuple[Diagnostic, ...]]:
+    """Select explicitly requested native validators without enabling disabled targets."""
+    if not requested_targets:
+        return enabled_targets, ()
+
+    requested_names = set(requested_targets)
+    enabled_by_name = {_source_name(target): target for target in enabled_targets}
+    diagnostics: list[Diagnostic] = []
+    for name in dict.fromkeys(requested_targets):
+        if name not in enabled_by_name:
+            diagnostics.append(
+                Diagnostic(
+                    Severity.FAIL,
+                    "PUBLISHING_TARGET_NOT_ENABLED",
+                    f"External publishing target {name!r} is not enabled by this configuration.",
+                )
+            )
+    selected = tuple(
+        target for target in enabled_targets if _source_name(target) in requested_names
+    )
+    return selected, tuple(diagnostics)
 
 
 def _source_name(source: Mapping[str, object]) -> str:

@@ -88,6 +88,66 @@ def test_external_checks_only_receive_enabled_publishing_targets(
     assert captured["kwargs"] == {"dry_run": True, "requested": True}
 
 
+def test_external_target_selection_excludes_other_enabled_targets(
+    plugin_factory,
+    monkeypatch,
+) -> None:
+    root = plugin_factory()
+    (root / ".skills-eval.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "publishing": {
+                    "targets": [
+                        {"name": "claude-plugin", "enabled": True},
+                        {"name": "skillhub", "enabled": True},
+                        {"name": "clawhub", "enabled": True},
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    def record_checks(root, skills, targets, **kwargs):
+        captured.update(targets=targets, kwargs=kwargs)
+        return ()
+
+    monkeypatch.setattr("skills_eval.service.run_publishing_checks", record_checks)
+
+    result = run_check(
+        root,
+        selector=None,
+        dry_run=True,
+        external=True,
+        external_targets=("claude-plugin", "clawhub"),
+    )
+
+    assert [target["name"] for target in captured["targets"]] == [
+        "claude-plugin",
+        "clawhub",
+    ]
+    assert captured["kwargs"] == {"dry_run": True, "requested": True}
+    assert result.requested_external_targets == ("claude-plugin", "clawhub")
+
+
+def test_requested_disabled_external_target_is_a_configuration_error(plugin_factory) -> None:
+    root = plugin_factory()
+    result = run_check(
+        root,
+        selector=None,
+        dry_run=True,
+        external=True,
+        external_targets=("skillhub",),
+    )
+
+    assert [diagnostic.code for diagnostic in result.diagnostics] == [
+        "PUBLISHING_TARGET_NOT_ENABLED"
+    ]
+    assert result.exit_code == 2
+
+
 def test_selector_scans_only_the_selected_skill_with_configured_options(
     plugin_factory,
     monkeypatch,

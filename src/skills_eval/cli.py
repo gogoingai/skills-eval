@@ -43,9 +43,20 @@ def check(
         "--external",
         help="Run configured native publishing-platform validations; never publishes.",
     ),
+    external_target: list[str] | None = typer.Option(
+        None,
+        "--external-target",
+        help="Run native validation only for this enabled publishing target; repeatable.",
+    ),
 ) -> None:
     """Check a Claude Plugin repository before release."""
-    result = run_check(path, selector=skill, dry_run=dry_run, external=external)
+    result = run_check(
+        path,
+        selector=skill,
+        dry_run=dry_run,
+        external=external or bool(external_target),
+        external_targets=tuple(external_target or ()),
+    )
     typer.echo(render_terminal(result))
     if not dry_run:
         report_path = path.resolve() / "skills-eval-report.md"

@@ -23,9 +23,16 @@ skills-eval check . --skill wenqu-write
 # or writing a report.
 skills-eval check . --dry-run
 
-# Before releasing to a configured platform, also run its native validator.
+# Before a full platform release, run every enabled native validator.
 # This validates only: it never publishes a Skill or package.
 skills-eval check . --external
+
+# On a pull request, run only the native validators that do not need a
+# platform login. Repeat --external-target to select them explicitly.
+skills-eval check . \
+  --external-target claude-plugin \
+  --external-target workbuddy \
+  --external-target clawhub
 ```
 
 A normal run prints a compact summary and writes `skills-eval-report.md` in the
@@ -102,12 +109,14 @@ publishing targets:
 - `skillhub`: `skillhub publish <selected-skill> --dry-run`
 - `clawhub`: `clawhub package validate .`
 
-`openclaw` currently has no separate native CLI validation. Missing tools,
-login failures, and network errors are reported as an **external publishing
-validation** environment failure, never as a Skill security finding. Use
-`CODEBUDDY_BIN`, `SKILLHUB_BIN`, or `CLAWHUB_BIN` when a CLI is not on `PATH`.
-The SkillHub command always includes `--dry-run`; Skills Eval never invokes a
-publish command without that platform-provided safety flag.
+`openclaw` currently has no separate native CLI validation. Use
+`--external-target <name>` repeatedly to select only configured and enabled
+targets; a selected target is shown in the terminal and Markdown report.
+Missing tools, login failures, and network errors are reported as an **external
+publishing validation** environment failure, never as a Skill security finding.
+Use `CODEBUDDY_BIN`, `SKILLHUB_BIN`, or `CLAWHUB_BIN` when a CLI is not on
+`PATH`. The SkillHub command always includes `--dry-run`; Skills Eval never
+invokes a publish command without that platform-provided safety flag.
 
 `report.language` accepts `auto` (the default), `zh`, or `en`. In `auto` mode,
 Skills Eval reads the computer's preferred language: Chinese preferences render
@@ -144,7 +153,7 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
-      - uses: gogoingai/skills-eval@v0.1.10
+      - uses: gogoingai/skills-eval@v0.1.11
         with:
           path: .
 ```
@@ -161,13 +170,18 @@ because commenting is non-fatal. Set `comment: false` to disable PR comments.
 The caller controls triggers; this Action never publishes a package, creates a
 tag, or changes repository files.
 
-Set `external: true` only on a protected, release-only workflow runner that has
-the required platform CLIs and credentials. It is `false` by default, so PR
-checks remain portable:
+For a PR, set `external-targets` to the local validators. The Action installs
+the corresponding CLIs on the runner, then records exactly these commands in
+the report. This does not need a marketplace credential:
 
 ```yaml
-      - uses: gogoingai/skills-eval@v0.1.10
+      - uses: gogoingai/skills-eval@v0.1.11
         with:
           path: .
-          external: true
+          external-targets: claude-plugin,workbuddy,clawhub
 ```
+
+Keep SkillHub `--dry-run` in a protected, release-only workflow with its
+platform credential. To run every enabled native validator, use `external: true`;
+that mode assumes the required tools and credentials are already available on
+the runner.

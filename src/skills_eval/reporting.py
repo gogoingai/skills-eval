@@ -510,6 +510,8 @@ def _append_terminal_publishing_checks(lines: list[str], result: CheckResult) ->
     if not result.external_checks_requested:
         return
     lines.append("External publishing checks:")
+    if result.requested_external_targets:
+        lines.append(f"  Requested targets: {', '.join(result.requested_external_targets)}")
     if not result.publishing_checks:
         lines.append("  (no enabled publishing targets have native validators)")
         return
@@ -534,6 +536,17 @@ def _append_publishing_checks(
         return
 
     lines.extend(("", heading, ""))
+    if result.requested_external_targets:
+        names = (
+            "、".join(result.requested_external_targets)
+            if language == "zh"
+            else ", ".join(result.requested_external_targets)
+        )
+        lines.append(
+            f"- 本次执行目标：{_markdown(names)}。" if language == "zh"
+            else f"- Requested targets: {_markdown(names)}."
+        )
+        lines.append("")
     if not result.publishing_checks:
         lines.append(
             "No enabled publishing targets have a native validator."

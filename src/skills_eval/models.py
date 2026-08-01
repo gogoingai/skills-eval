@@ -122,6 +122,7 @@ class CheckResult:
     format_checks: tuple[str, ...] = ()
     publishing_checks: tuple[PublishingCheckResult, ...] = ()
     external_checks_requested: bool = False
+    requested_external_targets: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "skills", tuple(self.skills))
@@ -137,6 +138,11 @@ class CheckResult:
         object.__setattr__(self, "publishing_targets", tuple(self.publishing_targets))
         object.__setattr__(self, "format_checks", tuple(self.format_checks))
         object.__setattr__(self, "publishing_checks", tuple(self.publishing_checks))
+        object.__setattr__(
+            self,
+            "requested_external_targets",
+            tuple(self.requested_external_targets),
+        )
 
     @property
     def severity(self) -> Severity:
@@ -204,6 +210,7 @@ def _uses_error_exit_code(diagnostic: Diagnostic) -> bool:
         "CONFIG_INVALID",
         "SKILL_SELECTOR_NOT_FOUND",
         "SKILL_SELECTOR_AMBIGUOUS",
+        "PUBLISHING_TARGET_NOT_ENABLED",
     }
 
 

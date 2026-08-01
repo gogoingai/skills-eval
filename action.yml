@@ -18,10 +18,14 @@ inputs:
     description: Run native publishing-platform validations; never publishes.
     required: false
     default: "false"
+  external-targets:
+    description: Comma-separated enabled publishing targets to validate (for example, claude-plugin,workbuddy,clawhub).
+    required: false
+    default: ""
   version:
     description: PyPI requirement used to run Skills Eval.
     required: false
-    default: skills-eval>=0.1.10,<0.2
+    default: skills-eval>=0.1.11,<0.2
   comment:
     description: Update one summary comment when the workflow runs for a pull request.
     required: false
@@ -42,6 +46,29 @@ runs:
     - name: Install pipx
       shell: bash
       run: python -m pip install --user pipx
+    - name: Set up Node for native validators
+      if: ${{ inputs.external-targets != '' }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+    - name: Install selected native validators
+      if: ${{ inputs.external-targets != '' }}
+      shell: bash
+      env:
+        INPUT_EXTERNAL_TARGETS: ${{ inputs.external-targets }}
+      run: |
+        set -euo pipefail
+        IFS=',' read -r -a targets <<< "$INPUT_EXTERNAL_TARGETS"
+        for target in "${targets[@]}"; do
+          target="${target//[[:space:]]/}"
+          case "$target" in
+            claude-plugin) npm install --global @anthropic-ai/claude-code ;;
+            workbuddy) npm install --global @tencent-ai/codebuddy-code ;;
+            clawhub) npm install --global clawhub ;;
+            "") ;;
+            *) echo "Unsupported automatic native validator: $target" >&2; exit 2 ;;
+          esac
+        done
     - name: Run Skills Eval
       id: check
       shell: bash
@@ -50,6 +77,7 @@ runs:
         INPUT_SKILL: ${{ inputs.skill }}
         INPUT_DRY_RUN: ${{ inputs.dry-run }}
         INPUT_EXTERNAL: ${{ inputs.external }}
+        INPUT_EXTERNAL_TARGETS: ${{ inputs.external-targets }}
         INPUT_VERSION: ${{ inputs.version }}
       run: |
         set +e
@@ -64,8 +92,15 @@ runs:
           report_path="$(cd "$INPUT_PATH" && pwd)/skills-eval-report.md"
           echo "report-path=$report_path" >> "$GITHUB_OUTPUT"
         fi
-        if [[ "$INPUT_EXTERNAL" == "true" ]]; then
+        if [[ "$INPUT_EXTERNAL" == "true" || -n "$INPUT_EXTERNAL_TARGETS" ]]; then
           command+=(--external)
+        fi
+        if [[ -n "$INPUT_EXTERNAL_TARGETS" ]]; then
+          IFS=',' read -r -a targets <<< "$INPUT_EXTERNAL_TARGETS"
+          for target in "${targets[@]}"; do
+            target="${target//[[:space:]]/}"
+            [[ -n "$target" ]] && command+=(--external-target "$target")
+          done
         fi
         "${command[@]}"
         echo "exit-code=$?" >> "$GITHUB_OUTPUT"
