@@ -101,7 +101,9 @@ environment and `id-token: write`; it does not use a `PYPI_TOKEN`.
 
 The repository also provides a reusable GitHub Action. It installs the selected
 published CLI version, runs the check, and uploads `skills-eval-report.md` as an
-artifact even when the check fails.
+artifact even when the check fails. For pull requests, it creates one marked
+comment and updates that same comment after each later push, so the result is
+visible without downloading the report.
 
 ```yaml
 name: Skills review
@@ -114,15 +116,24 @@ on:
 jobs:
   audit:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: write
     steps:
       - uses: actions/checkout@v4
-      - uses: gogoingai/skills-eval@v0.1.5
+      - uses: gogoingai/skills-eval@v0.1.6
         with:
           path: .
 ```
 
 `pull_request` runs when a PR opens and on every later push to its branch, so
-maintainers see the result in the PR's **Checks** tab. The same run appears in
-the repository's **Actions** page, where the report artifact can be downloaded.
+maintainers see an up-to-date **Skills Eval 审查结果** comment as well as the
+result in the PR's **Checks** tab. The comment includes a link to download the
+full report; the same artifact is also available from the run in the
+repository's **Actions** page. The comment step uses the automatic
+`GITHUB_TOKEN`; no secret needs to be configured. On a PR from an external fork
+GitHub can deny comment write access; the audit and artifact still complete
+because commenting is non-fatal. Set `comment: false` to disable PR comments.
 The caller controls triggers; this Action never publishes a package, creates a
 tag, or changes repository files.
