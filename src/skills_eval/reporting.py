@@ -95,7 +95,7 @@ def _render_markdown_zh(result: CheckResult, path: Path) -> str:
         f"- 插件：{_markdown(result.plugin_name)}",
         f"- 审查结果：{result.status.value}",
         f"- 发布建议：{_release_recommendation(result, 'zh')}",
-        f"- 演练模式：{'是（未执行安全扫描）' if result.dry_run else '否'}",
+        f"- 校验执行方式：{_execution_mode(result, 'zh')}",
         "",
         "## 一句话总结",
         "",
@@ -196,7 +196,7 @@ def _render_markdown_en(result: CheckResult, path: Path) -> str:
         f"- Plugin: {_markdown(result.plugin_name)}",
         f"- Status: {result.status.value}",
         f"- Release recommendation: {_release_recommendation(result, 'en')}",
-        f"- Dry run: {'yes (security scanners were not run)' if result.dry_run else 'no'}",
+        f"- Execution mode: {_execution_mode(result, 'en')}",
         "",
         "## At a glance",
         "",
@@ -381,7 +381,7 @@ def _security_coverage(result: CheckResult, skill: Skill, language: str) -> str:
         sources = ", ".join(result.planned_security_sources)
         if language == "en":
             return f"not run (dry run; planned: {_markdown(sources or 'no enabled scanners')})"
-        return f"未执行（演练模式；计划使用：{_markdown(sources or '没有启用扫描器')}）"
+        return f"未执行（预览；计划使用：{_markdown(sources or '没有启用扫描器')}）"
     sources = ", ".join(
         str(source.get("name", "unknown"))
         for source in result.security_sources
@@ -418,6 +418,20 @@ def _release_recommendation(result: CheckResult, language: str) -> str:
     )
 
 
+def _execution_mode(result: CheckResult, language: str) -> str:
+    if language == "en":
+        return (
+            "preview (security scanners and external publishing validation were not run)"
+            if result.dry_run
+            else "live run (security scanners ran; external publishing validation ran when requested)"
+        )
+    return (
+        "预览（未运行安全扫描和外部发布校验）"
+        if result.dry_run
+        else "真实执行（安全扫描已运行；外部发布校验按请求执行）"
+    )
+
+
 def _plain_summary(result: CheckResult, language: str) -> tuple[str, str]:
     format_failures = [skill.name for skill in result.skills if skill.format_status is Severity.FAIL]
     if format_failures:
@@ -437,7 +451,7 @@ def _plain_summary(result: CheckResult, language: str) -> tuple[str, str]:
         security_summary = (
             "- Security: dry run; security scanners were not run."
             if language == "en"
-            else "- 安全：演练模式，尚未执行安全扫描。"
+            else "- 安全：预览，尚未执行安全扫描。"
         )
     else:
         reviews = [

@@ -41,6 +41,25 @@ def test_markdown_report_describes_scope_and_per_skill_coverage(sample_result, t
     assert "安全：write 需要人工确认；其余通过。" in text
 
 
+def test_report_uses_clear_execution_mode_labels(tmp_path) -> None:
+    live_output = tmp_path / "live.md"
+    preview_output = tmp_path / "preview.md"
+    live_result = CheckResult(plugin_name="example", report_language="zh")
+    preview_result = CheckResult(
+        plugin_name="example", report_language="zh", dry_run=True
+    )
+
+    write_markdown_report(live_result, live_output)
+    write_markdown_report(preview_result, preview_output)
+
+    live = live_output.read_text(encoding="utf-8")
+    preview = preview_output.read_text(encoding="utf-8")
+    assert "校验执行方式：真实执行" in live
+    assert "校验执行方式：预览" in preview
+    assert "演练模式" not in live
+    assert "演练模式" not in preview
+
+
 def test_markdown_report_renders_english_when_requested(tmp_path) -> None:
     skill = Skill(
         name="write",
