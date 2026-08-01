@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from importlib.metadata import version
 from pathlib import Path
 
 import typer
@@ -13,8 +14,22 @@ from skills_eval.service import run_check
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
 
+def _version_callback(value: bool) -> None:
+    if value:
+        typer.echo(f"skills-eval {version('skills-eval')}")
+        raise typer.Exit()
+
+
 @app.callback()
-def main() -> None:
+def main(
+    show_version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the installed Skills Eval version.",
+    ),
+) -> None:
     """Release checks for Claude Plugin Skill repositories."""
 
 
