@@ -26,6 +26,79 @@ def test_wenqu_profile_adds_distribution_requirements(tmp_path) -> None:
     assert "slug" in config.required_skill_frontmatter
 
 
+def test_wenqu_profile_enables_its_default_publishing_targets(tmp_path) -> None:
+    write_config(tmp_path, {"schemaVersion": 1, "extends": ["wenqu"]})
+
+    config, diagnostics = load_config(tmp_path)
+
+    assert diagnostics == []
+    assert config.publishing_targets == (
+        {"name": "claude-plugin", "enabled": True},
+        {"name": "workbuddy", "enabled": True},
+        {"name": "skillhub", "enabled": True},
+        {"name": "openclaw", "enabled": True},
+        {"name": "clawhub", "enabled": True},
+    )
+
+
+def test_publishing_target_overrides_profile_by_name(tmp_path) -> None:
+    write_config(
+        tmp_path,
+        {
+            "schemaVersion": 1,
+            "extends": ["wenqu"],
+            "publishing": {
+                "targets": [
+                    {"name": "skillhub", "enabled": False},
+                    {"name": "clawhub", "enabled": False, "options": {"dryRun": True}},
+                ]
+            },
+        },
+    )
+
+    config, diagnostics = load_config(tmp_path)
+
+    assert diagnostics == []
+    assert config.publishing_targets == (
+        {"name": "claude-plugin", "enabled": True},
+        {"name": "workbuddy", "enabled": True},
+        {"name": "skillhub", "enabled": False},
+        {"name": "openclaw", "enabled": True},
+        {"name": "clawhub", "enabled": False, "options": {"dryRun": True}},
+    )
+
+
+def test_unknown_or_duplicate_publishing_target_is_a_config_error(tmp_path) -> None:
+    write_config(
+        tmp_path,
+        {
+            "schemaVersion": 1,
+            "publishing": {"targets": [{"name": "unknown", "enabled": True}]},
+        },
+    )
+
+    _, diagnostics = load_config(tmp_path)
+
+    assert any(item.code == "CONFIG_INVALID" for item in diagnostics)
+
+    write_config(
+        tmp_path,
+        {
+            "schemaVersion": 1,
+            "publishing": {
+                "targets": [
+                    {"name": "skillhub", "enabled": True},
+                    {"name": "skillhub", "enabled": False},
+                ]
+            },
+        },
+    )
+
+    _, diagnostics = load_config(tmp_path)
+
+    assert any(item.code == "CONFIG_INVALID" for item in diagnostics)
+
+
 def test_standard_schema_url_is_allowed(tmp_path) -> None:
     write_config(
         tmp_path,

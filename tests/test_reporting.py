@@ -63,6 +63,31 @@ def test_terminal_summary_uses_requested_status_labels(sample_result) -> None:
     assert "Security    REVIEW" in terminal
 
 
+def test_reports_list_enabled_publishing_targets_and_rules(tmp_path) -> None:
+    result = CheckResult(
+        plugin_name="example",
+        report_language="zh",
+        publishing_targets=(
+            {"name": "claude-plugin", "enabled": True},
+            {"name": "clawhub", "enabled": False},
+        ),
+        format_checks=("claude-plugin：plugin 与 marketplace 元数据",),
+    )
+    output = tmp_path / "report.md"
+
+    write_markdown_report(result, output)
+
+    text = output.read_text(encoding="utf-8")
+    assert "## 已启用的发布目标" in text
+    assert "- claude-plugin" in text
+    assert "- clawhub" not in text
+    assert "claude-plugin：plugin 与 marketplace 元数据" in text
+    terminal = render_terminal(result)
+    assert "Publishing targets: claude-plugin" in terminal
+    assert "Format checks:" in terminal
+    assert "claude-plugin：plugin 与 marketplace 元数据" in terminal
+
+
 def test_terminal_summary_includes_repository_diagnostics() -> None:
     result = CheckResult(
         plugin_name="example",

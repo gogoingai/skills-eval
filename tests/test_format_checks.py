@@ -1,5 +1,6 @@
 import json
 import re
+from dataclasses import replace
 
 import pytest
 
@@ -42,11 +43,23 @@ def _write_wenqu_release_files(root, *, version: str = "1.2.3") -> None:
         ),
         encoding="utf-8",
     )
+    (root / "openclaw.plugin.json").write_text(
+        json.dumps({"version": version}),
+        encoding="utf-8",
+    )
+    (root / "package.json").write_text(
+        json.dumps({"name": "@gogoingai/wenqu-skills", "version": version}),
+        encoding="utf-8",
+    )
     _skill_file(root).write_text(
         "---\n"
         "name: write\n"
         "description: Test skill\n"
         "slug: write\n"
+        "displayName: Write\n"
+        "version: 1.2.3\n"
+        "summary: Write content\n"
+        "license: MIT\n"
         "metadata:\n"
         "  openclaw:\n"
         "    homepage: https://example.test/write\n"
@@ -326,3 +339,160 @@ def test_wenqu_checks_missing_and_unreferenced_image_assets(plugin_factory, wenq
     diagnostics = check_format(root, plugin, list(plugin.skills), wenqu_config)
 
     assert {"IMAGE_REFERENCE_MISSING", "IMAGE_ASSET_UNREFERENCED"} <= _codes(diagnostics)
+
+
+def _publishing_target_config(wenqu_config, target: str):
+    return replace(
+        wenqu_config,
+        publishing_targets=({"name": target, "enabled": True},),
+    )
+
+
+def test_claude_plugin_target_reports_undeclared_wenqu_skill(plugin_factory, wenqu_config) -> None:
+    root = plugin_factory()
+    _write_wenqu_release_files(root)
+    orphan = root / "wenqu-extra"
+    orphan.mkdir()
+    (orphan / "SKILL.md").write_text("---\nname: extra\ndescription: Extra\n---\n", encoding="utf-8")
+    plugin, _ = discover_plugin(root)
+    assert plugin is not None
+
+    diagnostics = check_format(
+        root, plugin, list(plugin.skills), _publishing_target_config(wenqu_config, "claude-plugin")
+    )
+
+    assert "PLUGIN_SKILL_UNDECLARED" in _codes(diagnostics)
+
+
+def test_workbuddy_target_requires_distribution_metadata(plugin_factory, wenqu_config) -> None:
+    root = plugin_factory()
+    _write_wenqu_release_files(root)
+    _skill_file(root).write_text(
+        _skill_file(root).read_text(encoding="utf-8").replace("displayName: Write\n", ""),
+        encoding="utf-8",
+    )
+    plugin, _ = discover_plugin(root)
+    assert plugin is not None
+
+    diagnostics = check_format(
+        root, plugin, list(plugin.skills), _publishing_target_config(wenqu_config, "workbuddy")
+    )
+
+    assert "WORKBUDDY_METADATA_MISSING" in _codes(diagnostics)
+
+
+def test_workbuddy_target_requires_a_semantic_skill_version(plugin_factory, wenqu_config) -> None:
+    root = plugin_factory()
+    _write_wenqu_release_files(root)
+    _skill_file(root).write_text(
+        _skill_file(root).read_text(encoding="utf-8").replace("version: 1.2.3", "version: current"),
+        encoding="utf-8",
+    )
+    plugin, _ = discover_plugin(root)
+    assert plugin is not None
+
+    diagnostics = check_format(
+        root, plugin, list(plugin.skills), _publishing_target_config(wenqu_config, "workbuddy")
+    )
+
+    assert "WORKBUDDY_VERSION_INVALID" in _codes(diagnostics)
+
+
+def test_skillhub_target_rejects_invalid_slug(plugin_factory, wenqu_config) -> None:
+    root = plugin_factory()
+    _write_wenqu_release_files(root)
+    _skill_file(root).write_text(
+        _skill_file(root).read_text(encoding="utf-8").replace("slug: write", "slug: Invalid_Slug"),
+        encoding="utf-8",
+    )
+    plugin, _ = discover_plugin(root)
+    assert plugin is not None
+
+    diagnostics = check_format(
+        root, plugin, list(plugin.skills), _publishing_target_config(wenqu_config, "skillhub")
+    )
+
+    assert "SKILLHUB_SLUG_INVALID" in _codes(diagnostics)
+
+
+def test_skillhub_target_rejects_duplicate_slugs_and_images(plugin_factory, wenqu_config) -> None:
+    root = plugin_factory(skills=["./write", "./review"])
+    _write_wenqu_release_files(root)
+    (root / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"name": "example-plugin", "version": "1.2.3", "skills": ["./write", "./review"]}),
+        encoding="utf-8",
+    )
+    (root / "review" / "SKILL.md").write_text(
+        _skill_file(root).read_text(encoding="utf-8").replace("name: write", "name: review"),
+        encoding="utf-8",
+    )
+    (root / "write" / "cover.png").write_bytes(b"image")
+    plugin, _ = discover_plugin(root)
+    assert plugin is not None
+
+    diagnostics = check_format(
+        root, plugin, list(plugin.skills), _publishing_target_config(wenqu_config, "skillhub")
+    )
+
+    assert {"SKILLHUB_SLUG_DUPLICATE", "SKILLHUB_UNSUPPORTED_FILE"} <= _codes(diagnostics)
+
+
+def test_openclaw_target_requires_manifest_version_match(plugin_factory, wenqu_config) -> None:
+    root = plugin_factory()
+    _write_wenqu_release_files(root)
+    (root / "openclaw.plugin.json").write_text('{"version": "0.0.1"}', encoding="utf-8")
+    plugin, _ = discover_plugin(root)
+    assert plugin is not None
+
+    diagnostics = check_format(
+        root, plugin, list(plugin.skills), _publishing_target_config(wenqu_config, "openclaw")
+    )
+
+    assert "OPENCLAW_VERSION_MISMATCH" in _codes(diagnostics)
+
+
+def test_clawhub_target_checks_package_identity(plugin_factory, wenqu_config) -> None:
+    root = plugin_factory()
+    _write_wenqu_release_files(root)
+    (root / "package.json").write_text('{"name": "wrong", "version": "1.2.3"}', encoding="utf-8")
+    plugin, _ = discover_plugin(root)
+    assert plugin is not None
+
+    diagnostics = check_format(
+        root, plugin, list(plugin.skills), _publishing_target_config(wenqu_config, "clawhub")
+    )
+
+    assert "PACKAGE_NAME_MISMATCH" in _codes(diagnostics)
+
+
+def test_disabled_target_does_not_contribute_diagnostics(plugin_factory, wenqu_config) -> None:
+    root = plugin_factory()
+    _write_wenqu_release_files(root)
+    (root / "package.json").write_text('{"name": "wrong", "version": "0.0.1"}', encoding="utf-8")
+    plugin, _ = discover_plugin(root)
+    assert plugin is not None
+    disabled_clawhub = replace(
+        wenqu_config,
+        publishing_targets=({"name": "clawhub", "enabled": False},),
+    )
+
+    diagnostics = check_format(root, plugin, list(plugin.skills), disabled_clawhub)
+
+    assert not {"PACKAGE_NAME_MISMATCH", "PACKAGE_VERSION_MISMATCH"} & _codes(diagnostics)
+
+
+def test_clawhub_target_accepts_matching_package_identity(plugin_factory, wenqu_config) -> None:
+    root = plugin_factory()
+    _write_wenqu_release_files(root)
+    (root / "package.json").write_text(
+        '{"name": "@gogoingai/wenqu-skills", "version": "1.2.3"}',
+        encoding="utf-8",
+    )
+    plugin, _ = discover_plugin(root)
+    assert plugin is not None
+
+    diagnostics = check_format(
+        root, plugin, list(plugin.skills), _publishing_target_config(wenqu_config, "clawhub")
+    )
+
+    assert diagnostics == []

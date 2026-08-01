@@ -270,9 +270,7 @@ def test_all_enabled_scanners_run_and_fail_takes_precedence(
                     "required_skill_frontmatter": ("name", "description"),
                     "forbidden_paths": (),
                     "reference_extensions": (".md",),
-                    "require_marketplace_metadata": False,
-                    "require_openclaw_metadata": False,
-                    "require_image_references": False,
+                    "publishing_targets": (),
                     "security_sources": (
                         {"name": "first", "enabled": True},
                         {"name": "disabled", "enabled": False},

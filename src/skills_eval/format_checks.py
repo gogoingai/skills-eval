@@ -26,6 +26,8 @@ _WENQU_IMAGE_REFERENCE = re.compile(
     re.IGNORECASE,
 )
 _HOST_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
+_SKILLHUB_SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,126}[a-z0-9])$")
+_CLAWHUB_PACKAGE_NAME = "@gogoingai/wenqu-skills"
 
 
 def check_format(root: Path, plugin: Plugin, skills: list[Skill], config: EvalConfig) -> list[Diagnostic]:
@@ -37,12 +39,12 @@ def check_format(root: Path, plugin: Plugin, skills: list[Skill], config: EvalCo
     _check_skill_frontmatter(skills, config, diagnostics)
     _check_local_references(root, skills, config, diagnostics)
 
-    if config.require_marketplace_metadata:
-        _check_wenqu_release_metadata(root, diagnostics)
-    if config.require_openclaw_metadata:
-        _check_openclaw_homepages(skills, diagnostics)
-    if config.require_image_references:
+    publishing_targets = _enabled_publishing_targets(config)
+    if publishing_targets:
+        _check_wenqu_release_baseline(root, diagnostics)
         _check_wenqu_image_assets(root, diagnostics)
+    for name in publishing_targets:
+        _PUBLISHING_TARGET_CHECKS[name](root, plugin, skills, diagnostics)
     return diagnostics
 
 
@@ -117,7 +119,15 @@ def _check_local_references(
                 _fail(diagnostics, "REFERENCE_MISSING", f"Local reference does not exist: {target}", source)
 
 
-def _check_wenqu_release_metadata(root: Path, diagnostics: list[Diagnostic]) -> None:
+def _enabled_publishing_targets(config: EvalConfig) -> tuple[str, ...]:
+    return tuple(
+        str(target["name"])
+        for target in getattr(config, "publishing_targets", ())
+        if target.get("enabled") is True
+    )
+
+
+def _check_wenqu_release_baseline(root: Path, diagnostics: list[Diagnostic]) -> None:
     version_path = root / "VERSION"
     version = _read_text(version_path, diagnostics, "VERSION_MISSING")
     if version is None:
@@ -131,6 +141,15 @@ def _check_wenqu_release_metadata(root: Path, diagnostics: list[Diagnostic]) -> 
     if changelog is not None and version and f"## {version}" not in changelog:
         _fail(diagnostics, "CHANGELOG_VERSION_MISSING", f"CHANGELOG.md has no entry for {version}", changelog_path)
 
+
+def _check_claude_plugin(
+    root: Path, plugin: Plugin, skills: list[Skill], diagnostics: list[Diagnostic]
+) -> None:
+    del skills
+    version_path = root / "VERSION"
+    version_text = _read_text(version_path, diagnostics, "VERSION_MISSING")
+    version = version_text.strip() if version_text is not None else ""
+
     manifest_path = root / ".claude-plugin" / "plugin.json"
     manifest = _read_json(manifest_path, diagnostics)
     if not isinstance(manifest, dict) or not version:
@@ -141,6 +160,8 @@ def _check_wenqu_release_metadata(root: Path, diagnostics: list[Diagnostic]) -> 
         return
     if manifest.get("version") != version:
         _fail(diagnostics, "PLUGIN_VERSION_MISMATCH", f"plugin.json must declare version {version}", manifest_path)
+
+    _check_undeclared_wenqu_skills(root, plugin, diagnostics)
 
     marketplace_path = root / ".claude-plugin" / "marketplace.json"
     marketplace = _read_json(marketplace_path, diagnostics)
@@ -166,6 +187,146 @@ def _check_wenqu_release_metadata(root: Path, diagnostics: list[Diagnostic]) -> 
         _fail(diagnostics, "MARKET_VERSION_MISMATCH", f"Marketplace version must be {version}.", marketplace_path)
     if not _is_nonempty_scalar(entry.get("description")):
         _fail(diagnostics, "MARKET_DESCRIPTION_MISSING", "Marketplace plugin must have a description.", marketplace_path)
+
+
+def _check_undeclared_wenqu_skills(root: Path, plugin: Plugin, diagnostics: list[Diagnostic]) -> None:
+    declared_paths = {skill.path.resolve() for skill in plugin.skills}
+    for path in root.iterdir():
+        if not path.is_dir() or not path.name.startswith("wenqu-"):
+            continue
+        skill_file = path / "SKILL.md"
+        if skill_file.is_file() and path.resolve() not in declared_paths:
+            _fail(
+                diagnostics,
+                "PLUGIN_SKILL_UNDECLARED",
+                f"{path.name}/SKILL.md exists but is absent from plugin.json skills.",
+                path,
+            )
+
+
+def _check_workbuddy(
+    root: Path, plugin: Plugin, skills: list[Skill], diagnostics: list[Diagnostic]
+) -> None:
+    del root, plugin
+    for skill in skills:
+        frontmatter = skill.frontmatter or {}
+        skill_file = skill.path / "SKILL.md"
+        for field in ("displayName", "version", "summary", "license"):
+            if field not in frontmatter:
+                _fail(
+                    diagnostics,
+                    "WORKBUDDY_METADATA_MISSING",
+                    f"SKILL.md is missing {field}.",
+                    skill_file,
+                )
+            elif not _is_nonempty_scalar(frontmatter[field]):
+                _fail(
+                    diagnostics,
+                    "WORKBUDDY_METADATA_EMPTY",
+                    f"SKILL.md has an empty {field}.",
+                    skill_file,
+                )
+        version = frontmatter.get("version")
+        if _is_nonempty_scalar(version) and not _SEMVER.fullmatch(str(version).strip()):
+            _fail(
+                diagnostics,
+                "WORKBUDDY_VERSION_INVALID",
+                f"SKILL.md has invalid version {version}.",
+                skill_file,
+            )
+
+
+def _check_skillhub(
+    root: Path, plugin: Plugin, skills: list[Skill], diagnostics: list[Diagnostic]
+) -> None:
+    del root, plugin
+    slugs: dict[str, Path] = {}
+    for skill in skills:
+        frontmatter = skill.frontmatter or {}
+        skill_file = skill.path / "SKILL.md"
+        slug = frontmatter.get("slug")
+        if not _is_nonempty_scalar(slug):
+            _fail(diagnostics, "SKILLHUB_SLUG_MISSING", "SKILL.md is missing slug.", skill_file)
+        else:
+            normalized_slug = str(slug).strip()
+            if not _SKILLHUB_SLUG.fullmatch(normalized_slug):
+                _fail(
+                    diagnostics,
+                    "SKILLHUB_SLUG_INVALID",
+                    f"SKILL.md has invalid SkillHub slug {normalized_slug}.",
+                    skill_file,
+                )
+            elif normalized_slug in slugs:
+                _fail(
+                    diagnostics,
+                    "SKILLHUB_SLUG_DUPLICATE",
+                    f"SKILL.md reuses slug {normalized_slug} already declared by {slugs[normalized_slug]}.",
+                    skill_file,
+                )
+            else:
+                slugs[normalized_slug] = skill_file
+        for image in _walk_files(skill.path, _IMAGE_EXTENSIONS):
+            _fail(
+                diagnostics,
+                "SKILLHUB_UNSUPPORTED_FILE",
+                f"SkillHub does not accept image files inside a Skill package: {image}",
+                image,
+            )
+
+
+def _check_openclaw(
+    root: Path, plugin: Plugin, skills: list[Skill], diagnostics: list[Diagnostic]
+) -> None:
+    del plugin
+    version_path = root / "VERSION"
+    version_text = _read_text(version_path, diagnostics, "VERSION_MISSING")
+    version = version_text.strip() if version_text is not None else ""
+    manifest_path = root / "openclaw.plugin.json"
+    manifest = _read_json(manifest_path, diagnostics)
+    if isinstance(manifest, dict) and version and manifest.get("version") != version:
+        _fail(
+            diagnostics,
+            "OPENCLAW_VERSION_MISMATCH",
+            f"openclaw.plugin.json must declare version {version}.",
+            manifest_path,
+        )
+    _check_openclaw_homepages(skills, diagnostics)
+
+
+def _check_clawhub(
+    root: Path, plugin: Plugin, skills: list[Skill], diagnostics: list[Diagnostic]
+) -> None:
+    del plugin, skills
+    version_path = root / "VERSION"
+    version_text = _read_text(version_path, diagnostics, "VERSION_MISSING")
+    version = version_text.strip() if version_text is not None else ""
+    package_path = root / "package.json"
+    package = _read_json(package_path, diagnostics)
+    if not isinstance(package, dict):
+        return
+    if package.get("name") != _CLAWHUB_PACKAGE_NAME:
+        _fail(
+            diagnostics,
+            "PACKAGE_NAME_MISMATCH",
+            f"package.json must use package name {_CLAWHUB_PACKAGE_NAME}.",
+            package_path,
+        )
+    if version and package.get("version") != version:
+        _fail(
+            diagnostics,
+            "PACKAGE_VERSION_MISMATCH",
+            f"package.json must declare version {version}.",
+            package_path,
+        )
+
+
+_PUBLISHING_TARGET_CHECKS = {
+    "claude-plugin": _check_claude_plugin,
+    "workbuddy": _check_workbuddy,
+    "skillhub": _check_skillhub,
+    "openclaw": _check_openclaw,
+    "clawhub": _check_clawhub,
+}
 
 
 def _check_openclaw_homepages(skills: list[Skill], diagnostics: list[Diagnostic]) -> None:

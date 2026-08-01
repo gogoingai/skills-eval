@@ -34,6 +34,7 @@ def run_check(root: Path, selector: str | None, dry_run: bool) -> CheckResult:
     plugin, discovery_diagnostics = discover_plugin(root)
     global_diagnostics = [*config_diagnostics, *discovery_diagnostics]
     enabled_sources = _enabled_sources(config)
+    enabled_publishing_targets = _enabled_publishing_targets(config)
     planned_sources = tuple(_source_name(source) for source in enabled_sources)
     report_language = resolve_report_language(getattr(config, "report_language", "auto"))
     format_rules = _format_rules(config, report_language)
@@ -48,6 +49,7 @@ def run_check(root: Path, selector: str | None, dry_run: bool) -> CheckResult:
             dry_run=dry_run,
             planned_security_sources=planned_sources,
             security_sources=enabled_sources,
+            publishing_targets=enabled_publishing_targets,
             format_checks=format_rules,
         )
 
@@ -139,6 +141,7 @@ def run_check(root: Path, selector: str | None, dry_run: bool) -> CheckResult:
         dry_run=dry_run,
         planned_security_sources=planned_sources,
         security_sources=enabled_sources,
+        publishing_targets=enabled_publishing_targets,
         format_checks=format_rules,
     )
 
@@ -146,6 +149,14 @@ def run_check(root: Path, selector: str | None, dry_run: bool) -> CheckResult:
 def _enabled_sources(config: EvalConfig) -> tuple[Mapping[str, object], ...]:
     return tuple(
         source for source in config.security_sources if source.get("enabled") is True
+    )
+
+
+def _enabled_publishing_targets(config: EvalConfig) -> tuple[Mapping[str, object], ...]:
+    return tuple(
+        target
+        for target in getattr(config, "publishing_targets", ())
+        if target.get("enabled") is True
     )
 
 
@@ -171,12 +182,7 @@ def _format_rules(config: EvalConfig, language: str) -> tuple[str, ...]:
             "Local file references within the selected Skill directories",
             "Configured temporary or forbidden files",
         ]
-        if config.require_marketplace_metadata:
-            rules.append("Wenqu release metadata consistency")
-        if config.require_openclaw_metadata:
-            rules.append("OpenClaw homepage metadata")
-        if config.require_image_references:
-            rules.append("Wenqu image asset references")
+        rules.extend(_publishing_target_rules(config, "en"))
         return tuple(rules)
     rules = [
         "Claude Plugin 清单有效性和已声明 Skill 的识别",
@@ -185,13 +191,34 @@ def _format_rules(config: EvalConfig, language: str) -> tuple[str, ...]:
         "所选 Skill 目录内的本地文件引用",
         "配置中禁止发布的临时文件",
     ]
-    if config.require_marketplace_metadata:
-        rules.append("Wenqu 发布元数据一致性")
-    if config.require_openclaw_metadata:
-        rules.append("OpenClaw 主页元数据")
-    if config.require_image_references:
-        rules.append("Wenqu 图片资源引用")
+    rules.extend(_publishing_target_rules(config, "zh"))
     return tuple(rules)
+
+
+def _publishing_target_rules(config: EvalConfig, language: str) -> list[str]:
+    enabled = {_source_name(target) for target in _enabled_publishing_targets(config)}
+    if not enabled:
+        return []
+    if language == "en":
+        rules = ["Wenqu release version, changelog, and image asset references"]
+        descriptions = {
+            "claude-plugin": "claude-plugin: plugin and marketplace metadata; undeclared wenqu-* Skills",
+            "workbuddy": "workbuddy: display name, version, summary, and license metadata",
+            "skillhub": "skillhub: unique valid slugs and no images inside a Skill package",
+            "openclaw": "openclaw: plugin version and HTTPS homepage metadata",
+            "clawhub": "clawhub: package identity and version consistency",
+        }
+    else:
+        rules = ["Wenqu 共用基线：版本、变更日志和图片资源引用"]
+        descriptions = {
+            "claude-plugin": "claude-plugin：plugin 与 marketplace 元数据；未声明的 wenqu-* Skill",
+            "workbuddy": "workbuddy：displayName、version、summary、license 元数据",
+            "skillhub": "skillhub：合法且唯一的 slug；Skill 包内禁止图片",
+            "openclaw": "openclaw：插件版本和 HTTPS 主页元数据",
+            "clawhub": "clawhub：package 包名与版本一致性",
+        }
+    rules.extend(descriptions[name] for name in descriptions if name in enabled)
+    return rules
 
 
 def _associate_format_diagnostics(

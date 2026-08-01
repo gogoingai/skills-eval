@@ -23,10 +23,7 @@
         "requiredRootFiles": { "$ref": "#/$defs/stringArray" },
         "requiredSkillFrontmatter": { "$ref": "#/$defs/stringArray" },
         "forbiddenPaths": { "$ref": "#/$defs/stringArray" },
-        "referenceExtensions": { "$ref": "#/$defs/stringArray" },
-        "requireMarketplaceMetadata": { "type": "boolean" },
-        "requireOpenClawMetadata": { "type": "boolean" },
-        "requireImageReferences": { "type": "boolean" }
+        "referenceExtensions": { "$ref": "#/$defs/stringArray" }
       }
     },
     "security": {
@@ -36,6 +33,17 @@
         "sources": {
           "type": "array",
           "items": { "$ref": "#/$defs/securitySource" }
+        }
+      }
+    },
+    "publishing": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "targets": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/publishingTarget" },
+          "uniqueItems": true
         }
       }
     },
@@ -68,6 +76,18 @@
             "useBehavioral": { "type": "boolean" }
           }
         }
+      }
+    },
+    "publishingTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "enabled"],
+      "properties": {
+        "name": {
+          "enum": ["claude-plugin", "workbuddy", "skillhub", "openclaw", "clawhub"]
+        },
+        "enabled": { "type": "boolean" },
+        "options": { "type": "object" }
       }
     }
   }

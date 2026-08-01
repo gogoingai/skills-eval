@@ -104,6 +104,7 @@ class CheckResult:
     dry_run: bool = False
     planned_security_sources: tuple[str, ...] = ()
     security_sources: tuple[Mapping[str, object], ...] = ()
+    publishing_targets: tuple[Mapping[str, object], ...] = ()
     format_checks: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -117,6 +118,7 @@ class CheckResult:
             tuple(self.planned_security_sources),
         )
         object.__setattr__(self, "security_sources", tuple(self.security_sources))
+        object.__setattr__(self, "publishing_targets", tuple(self.publishing_targets))
         object.__setattr__(self, "format_checks", tuple(self.format_checks))
 
     @property

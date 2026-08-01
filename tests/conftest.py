@@ -66,9 +66,13 @@ def wenqu_config() -> EvalConfig:
         forbidden_paths=(".DS_Store",),
         reference_extensions=(".md", ".txt", ".pdf", ".png", ".jpg", ".jpeg", ".webp"),
         security_sources=(),
-        require_marketplace_metadata=True,
-        require_openclaw_metadata=True,
-        require_image_references=True,
+        publishing_targets=(
+            {"name": "claude-plugin", "enabled": True},
+            {"name": "workbuddy", "enabled": True},
+            {"name": "skillhub", "enabled": True},
+            {"name": "openclaw", "enabled": True},
+            {"name": "clawhub", "enabled": True},
+        ),
     )
 
 

@@ -26,7 +26,7 @@ skills-eval check . --dry-run
 
 A normal run prints a compact summary and writes `skills-eval-report.md` in the
 target repository. The report records the selected Skills, each format rule,
-security scanner configuration, and every finding.
+enabled publishing targets, security scanner configuration, and every finding.
 
 ## Checks
 
@@ -48,6 +48,15 @@ through the GitHub-hosted schema URL:
   "$schema": "https://raw.githubusercontent.com/gogoingai/skills-eval/main/src/skills_eval/schemas/skills-eval.schema.json",
   "schemaVersion": 1,
   "extends": ["wenqu"],
+  "publishing": {
+    "targets": [
+      { "name": "claude-plugin", "enabled": true },
+      { "name": "workbuddy", "enabled": true },
+      { "name": "skillhub", "enabled": true },
+      { "name": "openclaw", "enabled": true },
+      { "name": "clawhub", "enabled": true }
+    ]
+  },
   "report": {
     "language": "auto"
   },
@@ -66,9 +75,17 @@ through the GitHub-hosted schema URL:
 }
 ```
 
-The `wenqu` profile adds Wenqu-specific release metadata, OpenClaw homepage,
-and image-asset checks. Security sources are a configured list so future
-scanners can be added without changing the command interface.
+The `wenqu` profile enables `claude-plugin`, `workbuddy`, `skillhub`,
+`openclaw`, and `clawhub`. Each target owns only its own static rules: version
+and changelog are the shared Wenqu baseline; package metadata, Skill metadata,
+slugs and package contents, and OpenClaw homepage metadata are checked only
+when their corresponding target is enabled. A project can override any profile
+target by repeating its `name` in `publishing.targets`; unsupported or duplicate
+target names are configuration errors. `options` is reserved for future
+target-specific behavior such as external validation and dry runs.
+
+Security sources are a configured list so future scanners can be added without
+changing the command interface.
 
 `report.language` accepts `auto` (the default), `zh`, or `en`. In `auto` mode,
 Skills Eval reads the computer's preferred language: Chinese preferences render

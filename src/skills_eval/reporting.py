@@ -31,6 +31,12 @@ def render_terminal(result: CheckResult) -> str:
                 f"  Security    {_security_status(skill)}",
             )
         )
+    targets = _enabled_publishing_targets(result)
+    if targets:
+        lines.append(f"Publishing targets: {', '.join(targets)}")
+        if result.format_checks:
+            lines.append("Format checks:")
+            lines.extend(f"  - {_terminal_text(rule)}" for rule in result.format_checks)
     if result.diagnostics:
         lines.extend(("Repository diagnostics:",))
         lines.extend(_terminal_diagnostic_line(diagnostic) for diagnostic in result.diagnostics)
@@ -101,6 +107,7 @@ def _render_markdown_zh(result: CheckResult, path: Path) -> str:
         lines.extend(f"- {_markdown(rule)}" for rule in result.format_checks)
     else:
         lines.append("本次没有记录格式检查明细。")
+    _append_publishing_targets(lines, result, "zh")
     lines.extend(
         (
             "",
@@ -200,6 +207,8 @@ def _render_markdown_en(result: CheckResult, path: Path) -> str:
         lines.extend(f"- {_markdown(rule)}" for rule in result.format_checks)
     else:
         lines.append("Format check details were not recorded for this run.")
+
+    _append_publishing_targets(lines, result, "en")
 
     lines.extend(("", "## Skill results", ""))
     if not result.skills:
@@ -452,6 +461,25 @@ def _plain_summary(result: CheckResult, language: str) -> tuple[str, str]:
 
 def _is_enabled(source: Mapping[str, object]) -> bool:
     return source.get("enabled") is not False
+
+
+def _enabled_publishing_targets(result: CheckResult) -> tuple[str, ...]:
+    return tuple(
+        str(target.get("name", "unknown"))
+        for target in result.publishing_targets
+        if _is_enabled(target)
+    )
+
+
+def _append_publishing_targets(lines: list[str], result: CheckResult, language: str) -> None:
+    heading = "## Enabled publishing targets" if language == "en" else "## 已启用的发布目标"
+    no_targets = "No publishing targets are enabled." if language == "en" else "没有启用发布目标。"
+    lines.extend(("", heading, ""))
+    targets = _enabled_publishing_targets(result)
+    if not targets:
+        lines.append(no_targets)
+    else:
+        lines.extend(f"- {_markdown(target)}" for target in targets)
 
 
 def _json(value: object) -> str:

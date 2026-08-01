@@ -3,9 +3,15 @@
     "requiredRootFiles": ["README.md", "README.en.md", "VERSION"],
     "requiredSkillFrontmatter": ["name", "description", "slug"],
     "forbiddenPaths": [".DS_Store"],
-    "referenceExtensions": [".md", ".txt", ".pdf", ".png", ".jpg", ".jpeg", ".webp"],
-    "requireMarketplaceMetadata": true,
-    "requireOpenClawMetadata": true,
-    "requireImageReferences": true
+    "referenceExtensions": [".md", ".txt", ".pdf", ".png", ".jpg", ".jpeg", ".webp"]
+  },
+  "publishing": {
+    "targets": [
+      {"name": "claude-plugin", "enabled": true},
+      {"name": "workbuddy", "enabled": true},
+      {"name": "skillhub", "enabled": true},
+      {"name": "openclaw", "enabled": true},
+      {"name": "clawhub", "enabled": true}
+    ]
   }
 }
