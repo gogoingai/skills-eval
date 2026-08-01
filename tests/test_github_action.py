@@ -11,7 +11,7 @@ def test_action_installs_requested_cli_and_uploads_report() -> None:
 
     assert action["runs"]["using"] == "composite"
     assert action["inputs"]["path"]["default"] == "."
-    assert action["inputs"]["version"]["default"] == "skills-eval>=0.1.9,<0.2"
+    assert action["inputs"]["version"]["default"] == "skills-eval>=0.1.10,<0.2"
     assert action["inputs"]["external"]["default"] == "false"
     assert action["outputs"]["report-path"]
     assert any(step.get("uses") == "actions/setup-python@v5" for step in action["runs"]["steps"])
@@ -53,7 +53,7 @@ def test_action_updates_one_pr_comment_after_uploading_the_report() -> None:
 def test_readme_documents_reusable_github_action() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "uses: gogoingai/skills-eval@v0.1.9" in readme
+    assert "uses: gogoingai/skills-eval@v0.1.10" in readme
     assert "pull-requests: write" in readme
     assert "automatic\n`GITHUB_TOKEN`" in readme
     assert "external: true" in readme

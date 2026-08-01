@@ -144,7 +144,7 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
-      - uses: gogoingai/skills-eval@v0.1.9
+      - uses: gogoingai/skills-eval@v0.1.10
         with:
           path: .
 ```
@@ -166,7 +166,7 @@ the required platform CLIs and credentials. It is `false` by default, so PR
 checks remain portable:
 
 ```yaml
-      - uses: gogoingai/skills-eval@v0.1.9
+      - uses: gogoingai/skills-eval@v0.1.10
         with:
           path: .
           external: true
