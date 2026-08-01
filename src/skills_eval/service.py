@@ -247,21 +247,21 @@ def _format_rules(config: EvalConfig, language: str) -> tuple[str, ...]:
 
 def _publishing_target_rules(config: EvalConfig, language: str) -> list[str]:
     enabled = {_source_name(target) for target in _enabled_publishing_targets(config)}
-    if not enabled:
-        return []
+    release = getattr(config, "release", {})
+    has_release_rules = isinstance(release, Mapping) and bool(release)
     if language == "en":
-        rules = ["Wenqu release version, changelog, and image asset references"]
+        rules = ["Configured release version, changelog, and asset references"] if has_release_rules else []
         descriptions = {
-            "claude-plugin": "claude-plugin: plugin and marketplace metadata; undeclared wenqu-* Skills",
+            "claude-plugin": "claude-plugin: plugin and marketplace metadata; configured undeclared-Skill discovery",
             "workbuddy": "workbuddy: display name, version, summary, and license metadata",
             "skillhub": "skillhub: unique valid slugs and no images inside a Skill package",
             "openclaw": "openclaw: plugin version and HTTPS homepage metadata",
             "clawhub": "clawhub: package identity and version consistency",
         }
     else:
-        rules = ["Wenqu 共用基线：版本、变更日志和图片资源引用"]
+        rules = ["项目配置的发布基线：版本、变更日志和图片资源引用"] if has_release_rules else []
         descriptions = {
-            "claude-plugin": "claude-plugin：plugin 与 marketplace 元数据；未声明的 wenqu-* Skill",
+            "claude-plugin": "claude-plugin：plugin 与 marketplace 元数据；按配置发现未声明的 Skill",
             "workbuddy": "workbuddy：displayName、version、summary、license 元数据",
             "skillhub": "skillhub：合法且唯一的 slug；Skill 包内禁止图片",
             "openclaw": "openclaw：插件版本和 HTTPS 主页元数据",

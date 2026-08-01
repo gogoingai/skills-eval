@@ -58,14 +58,30 @@ through the GitHub-hosted schema URL:
 {
   "$schema": "https://raw.githubusercontent.com/gogoingai/skills-eval/main/src/skills_eval/schemas/skills-eval.schema.json",
   "schemaVersion": 1,
-  "extends": ["wenqu"],
+  "format": {
+    "requiredRootFiles": ["README.md"],
+    "requiredSkillFrontmatter": ["license"],
+    "forbiddenPaths": [".DS_Store"],
+    "referenceExtensions": [".md", ".txt"]
+  },
+  "release": {
+    "versionFile": "VERSION",
+    "requireVersionSemver": true,
+    "changelogFile": "CHANGELOG.md",
+    "changelogVersionHeading": "## {version}"
+  },
   "publishing": {
     "targets": [
-      { "name": "claude-plugin", "enabled": true },
-      { "name": "workbuddy", "enabled": true },
-      { "name": "skillhub", "enabled": true },
-      { "name": "openclaw", "enabled": true },
-      { "name": "clawhub", "enabled": true }
+      {
+        "name": "claude-plugin",
+        "enabled": true,
+        "options": { "skillDirectoryPrefix": "skills-" }
+      },
+      {
+        "name": "clawhub",
+        "enabled": true,
+        "options": { "packageName": "@example/skills" }
+      }
     ]
   },
   "report": {
@@ -86,14 +102,15 @@ through the GitHub-hosted schema URL:
 }
 ```
 
-The `wenqu` profile enables `claude-plugin`, `workbuddy`, `skillhub`,
-`openclaw`, and `clawhub`. Each target owns only its own static rules: version
-and changelog are the shared Wenqu baseline; package metadata, Skill metadata,
-slugs and package contents, and OpenClaw homepage metadata are checked only
-when their corresponding target is enabled. A project can override any profile
-target by repeating its `name` in `publishing.targets`; unsupported or duplicate
-target names are configuration errors. `options` is reserved for future
-target-specific behavior such as external validation and dry runs.
+Skills Eval has no project-specific profiles or defaults. Each repository owns
+its own `.skills-eval.json`: `format` and `release` express repository
+conventions, while each enabled publishing target contributes only that
+platform's static checks. `release.assetReferences` can optionally define an
+asset directory, a documentation directory, and the reference prefix that must
+link them. Target `options` hold project-specific identities where a platform
+does not supply one itself—for example, `claude-plugin.skillDirectoryPrefix`
+and `clawhub.packageName`. Unsupported or duplicate target names are
+configuration errors.
 
 Security sources are a configured list so future scanners can be added without
 changing the command interface.
@@ -153,7 +170,7 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
-      - uses: gogoingai/skills-eval@v0.1.12
+      - uses: gogoingai/skills-eval@v0.1.13
         with:
           path: .
 ```
@@ -175,7 +192,7 @@ the corresponding CLIs on the runner, then records exactly these commands in
 the report. This does not need a marketplace credential:
 
 ```yaml
-      - uses: gogoingai/skills-eval@v0.1.12
+      - uses: gogoingai/skills-eval@v0.1.13
         with:
           path: .
           external-targets: claude-plugin,workbuddy,clawhub

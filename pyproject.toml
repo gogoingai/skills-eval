@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "skills-eval"
-version = "0.1.12"
+version = "0.1.13"
 description = "Evaluate Claude skills plugins"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -27,4 +27,4 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-skills_eval = ["schemas/*.json", "profiles/*.json"]
+skills_eval = ["schemas/*.json"]

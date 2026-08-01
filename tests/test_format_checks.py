@@ -342,9 +342,10 @@ def test_wenqu_checks_missing_and_unreferenced_image_assets(plugin_factory, wenq
 
 
 def _publishing_target_config(wenqu_config, target: str):
+    selected = next(item for item in wenqu_config.publishing_targets if item["name"] == target)
     return replace(
         wenqu_config,
-        publishing_targets=({"name": target, "enabled": True},),
+        publishing_targets=(selected,),
     )
 
 

@@ -11,11 +11,6 @@
       "format": "uri"
     },
     "schemaVersion": { "const": 1 },
-    "extends": {
-      "type": "array",
-      "items": { "enum": ["wenqu"] },
-      "uniqueItems": true
-    },
     "format": {
       "type": "object",
       "additionalProperties": false,
@@ -45,6 +40,17 @@
           "items": { "$ref": "#/$defs/publishingTarget" },
           "uniqueItems": true
         }
+      }
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "versionFile": { "type": "string", "minLength": 1 },
+        "requireVersionSemver": { "type": "boolean" },
+        "changelogFile": { "type": "string", "minLength": 1 },
+        "changelogVersionHeading": { "type": "string", "minLength": 1 },
+        "assetReferences": { "$ref": "#/$defs/assetReferences" }
       }
     },
     "report": {
@@ -88,6 +94,16 @@
         },
         "enabled": { "type": "boolean" },
         "options": { "type": "object" }
+      }
+    },
+    "assetReferences": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["assetDirectory", "documentationDirectory", "referencePrefix"],
+      "properties": {
+        "assetDirectory": { "type": "string", "minLength": 1 },
+        "documentationDirectory": { "type": "string", "minLength": 1 },
+        "referencePrefix": { "type": "string", "minLength": 1 }
       }
     }
   }

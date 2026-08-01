@@ -67,12 +67,31 @@ def wenqu_config() -> EvalConfig:
         reference_extensions=(".md", ".txt", ".pdf", ".png", ".jpg", ".jpeg", ".webp"),
         security_sources=(),
         publishing_targets=(
-            {"name": "claude-plugin", "enabled": True},
+            {
+                "name": "claude-plugin",
+                "enabled": True,
+                "options": {"skillDirectoryPrefix": "wenqu-"},
+            },
             {"name": "workbuddy", "enabled": True},
             {"name": "skillhub", "enabled": True},
             {"name": "openclaw", "enabled": True},
-            {"name": "clawhub", "enabled": True},
+            {
+                "name": "clawhub",
+                "enabled": True,
+                "options": {"packageName": "@gogoingai/wenqu-skills"},
+            },
         ),
+        release={
+            "versionFile": "VERSION",
+            "requireVersionSemver": True,
+            "changelogFile": "CHANGELOG.md",
+            "changelogVersionHeading": "## {version}",
+            "assetReferences": {
+                "assetDirectory": "wenqu-image-assets/styles",
+                "documentationDirectory": "wenqu-image",
+                "referencePrefix": "wenqu-image-assets/styles",
+            },
+        },
     )
 
 

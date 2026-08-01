@@ -1,4 +1,4 @@
-"""Portable plugin format checks with optional Wenqu release rules."""
+"""Portable plugin format checks with optional, project-configured release rules."""
 
 from __future__ import annotations
 
@@ -21,13 +21,8 @@ from skills_eval.references import extract_local_references
 
 _SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$")
 _IMAGE_EXTENSIONS = frozenset({".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg"})
-_WENQU_IMAGE_REFERENCE = re.compile(
-    r"wenqu-image-assets/styles/([A-Za-z0-9._/-]+\.(?:png|jpe?g|webp|gif|svg))",
-    re.IGNORECASE,
-)
 _HOST_LABEL = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?")
 _SKILLHUB_SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,126}[a-z0-9])$")
-_CLAWHUB_PACKAGE_NAME = "@gogoingai/wenqu-skills"
 
 
 def check_format(root: Path, plugin: Plugin, skills: list[Skill], config: EvalConfig) -> list[Diagnostic]:
@@ -39,12 +34,11 @@ def check_format(root: Path, plugin: Plugin, skills: list[Skill], config: EvalCo
     _check_skill_frontmatter(skills, config, diagnostics)
     _check_local_references(root, skills, config, diagnostics)
 
-    publishing_targets = _enabled_publishing_targets(config)
-    if publishing_targets:
-        _check_wenqu_release_baseline(root, diagnostics)
-        _check_wenqu_image_assets(root, diagnostics)
-    for name in publishing_targets:
-        _PUBLISHING_TARGET_CHECKS[name](root, plugin, skills, diagnostics)
+    _check_release_baseline(root, config, diagnostics)
+    _check_asset_references(root, config, diagnostics)
+    for target in _enabled_publishing_targets(config):
+        name = str(target["name"])
+        _PUBLISHING_TARGET_CHECKS[name](root, plugin, skills, config, target, diagnostics)
     return diagnostics
 
 
@@ -119,49 +113,74 @@ def _check_local_references(
                 _fail(diagnostics, "REFERENCE_MISSING", f"Local reference does not exist: {target}", source)
 
 
-def _enabled_publishing_targets(config: EvalConfig) -> tuple[str, ...]:
+def _enabled_publishing_targets(config: EvalConfig) -> tuple[Mapping[str, object], ...]:
     return tuple(
-        str(target["name"])
+        target
         for target in getattr(config, "publishing_targets", ())
         if target.get("enabled") is True
     )
 
 
-def _check_wenqu_release_baseline(root: Path, diagnostics: list[Diagnostic]) -> None:
-    version_path = root / "VERSION"
+def _release_version(root: Path, config: EvalConfig, diagnostics: list[Diagnostic]) -> str | None:
+    release = _release_settings(config)
+    version_file = release.get("versionFile")
+    if not isinstance(version_file, str):
+        return None
+    version_path = root / version_file
     version = _read_text(version_path, diagnostics, "VERSION_MISSING")
     if version is None:
-        return
+        return None
     version = version.strip()
-    if not _SEMVER.fullmatch(version):
-        _fail(diagnostics, "VERSION_INVALID", f"VERSION must contain a semantic version, got {version or 'none'}", version_path)
+    if release.get("requireVersionSemver") is True and not _SEMVER.fullmatch(version):
+        _fail(diagnostics, "VERSION_INVALID", f"{version_file} must contain a semantic version, got {version or 'none'}", version_path)
+    return version
 
-    changelog_path = root / "CHANGELOG.md"
+
+def _check_release_baseline(root: Path, config: EvalConfig, diagnostics: list[Diagnostic]) -> None:
+    version = _release_version(root, config, diagnostics)
+    release = _release_settings(config)
+    changelog_file = release.get("changelogFile")
+    if version is None or not isinstance(changelog_file, str):
+        return
+    changelog_path = root / changelog_file
     changelog = _read_text(changelog_path, diagnostics, "CHANGELOG_MISSING")
-    if changelog is not None and version and f"## {version}" not in changelog:
-        _fail(diagnostics, "CHANGELOG_VERSION_MISSING", f"CHANGELOG.md has no entry for {version}", changelog_path)
+    heading = release.get("changelogVersionHeading", "## {version}")
+    assert isinstance(heading, str)
+    if changelog is not None and version and heading.replace("{version}", version) not in changelog:
+        _fail(
+            diagnostics,
+            "CHANGELOG_VERSION_MISSING",
+            f"{changelog_file} has no entry for {version}",
+            changelog_path,
+        )
 
 
 def _check_claude_plugin(
-    root: Path, plugin: Plugin, skills: list[Skill], diagnostics: list[Diagnostic]
+    root: Path,
+    plugin: Plugin,
+    skills: list[Skill],
+    config: EvalConfig,
+    target: Mapping[str, object],
+    diagnostics: list[Diagnostic],
 ) -> None:
     del skills
-    version_path = root / "VERSION"
-    version_text = _read_text(version_path, diagnostics, "VERSION_MISSING")
-    version = version_text.strip() if version_text is not None else ""
+    version = _release_version(root, config, diagnostics)
 
     manifest_path = root / ".claude-plugin" / "plugin.json"
     manifest = _read_json(manifest_path, diagnostics)
-    if not isinstance(manifest, dict) or not version:
+    if not isinstance(manifest, dict):
         return
     plugin_name = manifest.get("name")
     if not isinstance(plugin_name, str) or not plugin_name:
         _fail(diagnostics, "PLUGIN_NAME_MISSING", "plugin.json must declare name", manifest_path)
         return
-    if manifest.get("version") != version:
+    if version is not None and manifest.get("version") != version:
         _fail(diagnostics, "PLUGIN_VERSION_MISMATCH", f"plugin.json must declare version {version}", manifest_path)
 
-    _check_undeclared_wenqu_skills(root, plugin, diagnostics)
+    options = _target_options(target)
+    skill_directory_prefix = options.get("skillDirectoryPrefix")
+    if isinstance(skill_directory_prefix, str):
+        _check_undeclared_skills(root, plugin, skill_directory_prefix, diagnostics)
 
     marketplace_path = root / ".claude-plugin" / "marketplace.json"
     marketplace = _read_json(marketplace_path, diagnostics)
@@ -183,16 +202,18 @@ def _check_claude_plugin(
         return
     if entry.get("source") != "./":
         _fail(diagnostics, "MARKET_SOURCE_INVALID", "Marketplace plugin source must be './'.", marketplace_path)
-    if entry.get("version") != version:
+    if version is not None and entry.get("version") != version:
         _fail(diagnostics, "MARKET_VERSION_MISMATCH", f"Marketplace version must be {version}.", marketplace_path)
     if not _is_nonempty_scalar(entry.get("description")):
         _fail(diagnostics, "MARKET_DESCRIPTION_MISSING", "Marketplace plugin must have a description.", marketplace_path)
 
 
-def _check_undeclared_wenqu_skills(root: Path, plugin: Plugin, diagnostics: list[Diagnostic]) -> None:
+def _check_undeclared_skills(
+    root: Path, plugin: Plugin, directory_prefix: str, diagnostics: list[Diagnostic]
+) -> None:
     declared_paths = {skill.path.resolve() for skill in plugin.skills}
     for path in root.iterdir():
-        if not path.is_dir() or not path.name.startswith("wenqu-"):
+        if not path.is_dir() or not path.name.startswith(directory_prefix):
             continue
         skill_file = path / "SKILL.md"
         if skill_file.is_file() and path.resolve() not in declared_paths:
@@ -205,9 +226,14 @@ def _check_undeclared_wenqu_skills(root: Path, plugin: Plugin, diagnostics: list
 
 
 def _check_workbuddy(
-    root: Path, plugin: Plugin, skills: list[Skill], diagnostics: list[Diagnostic]
+    root: Path,
+    plugin: Plugin,
+    skills: list[Skill],
+    config: EvalConfig,
+    target: Mapping[str, object],
+    diagnostics: list[Diagnostic],
 ) -> None:
-    del root, plugin
+    del root, plugin, config, target
     for skill in skills:
         frontmatter = skill.frontmatter or {}
         skill_file = skill.path / "SKILL.md"
@@ -237,9 +263,14 @@ def _check_workbuddy(
 
 
 def _check_skillhub(
-    root: Path, plugin: Plugin, skills: list[Skill], diagnostics: list[Diagnostic]
+    root: Path,
+    plugin: Plugin,
+    skills: list[Skill],
+    config: EvalConfig,
+    target: Mapping[str, object],
+    diagnostics: list[Diagnostic],
 ) -> None:
-    del root, plugin
+    del root, plugin, config, target
     slugs: dict[str, Path] = {}
     for skill in skills:
         frontmatter = skill.frontmatter or {}
@@ -275,15 +306,18 @@ def _check_skillhub(
 
 
 def _check_openclaw(
-    root: Path, plugin: Plugin, skills: list[Skill], diagnostics: list[Diagnostic]
+    root: Path,
+    plugin: Plugin,
+    skills: list[Skill],
+    config: EvalConfig,
+    target: Mapping[str, object],
+    diagnostics: list[Diagnostic],
 ) -> None:
-    del plugin
-    version_path = root / "VERSION"
-    version_text = _read_text(version_path, diagnostics, "VERSION_MISSING")
-    version = version_text.strip() if version_text is not None else ""
+    del plugin, target
+    version = _release_version(root, config, diagnostics)
     manifest_path = root / "openclaw.plugin.json"
     manifest = _read_json(manifest_path, diagnostics)
-    if isinstance(manifest, dict) and version and manifest.get("version") != version:
+    if isinstance(manifest, dict) and version is not None and manifest.get("version") != version:
         _fail(
             diagnostics,
             "OPENCLAW_VERSION_MISMATCH",
@@ -294,24 +328,28 @@ def _check_openclaw(
 
 
 def _check_clawhub(
-    root: Path, plugin: Plugin, skills: list[Skill], diagnostics: list[Diagnostic]
+    root: Path,
+    plugin: Plugin,
+    skills: list[Skill],
+    config: EvalConfig,
+    target: Mapping[str, object],
+    diagnostics: list[Diagnostic],
 ) -> None:
     del plugin, skills
-    version_path = root / "VERSION"
-    version_text = _read_text(version_path, diagnostics, "VERSION_MISSING")
-    version = version_text.strip() if version_text is not None else ""
+    version = _release_version(root, config, diagnostics)
     package_path = root / "package.json"
     package = _read_json(package_path, diagnostics)
     if not isinstance(package, dict):
         return
-    if package.get("name") != _CLAWHUB_PACKAGE_NAME:
+    package_name = _target_options(target).get("packageName")
+    if isinstance(package_name, str) and package.get("name") != package_name:
         _fail(
             diagnostics,
             "PACKAGE_NAME_MISMATCH",
-            f"package.json must use package name {_CLAWHUB_PACKAGE_NAME}.",
+            f"package.json must use package name {package_name}.",
             package_path,
         )
-    if version and package.get("version") != version:
+    if version is not None and package.get("version") != version:
         _fail(
             diagnostics,
             "PACKAGE_VERSION_MISMATCH",
@@ -327,6 +365,16 @@ _PUBLISHING_TARGET_CHECKS = {
     "openclaw": _check_openclaw,
     "clawhub": _check_clawhub,
 }
+
+
+def _target_options(target: Mapping[str, object]) -> Mapping[str, object]:
+    options = target.get("options")
+    return options if isinstance(options, Mapping) else {}
+
+
+def _release_settings(config: EvalConfig) -> Mapping[str, object]:
+    release = getattr(config, "release", {})
+    return release if isinstance(release, Mapping) else {}
 
 
 def _check_openclaw_homepages(skills: list[Skill], diagnostics: list[Diagnostic]) -> None:
@@ -380,9 +428,17 @@ def _is_valid_hostname(hostname: str) -> bool:
     )
 
 
-def _check_wenqu_image_assets(root: Path, diagnostics: list[Diagnostic]) -> None:
-    asset_root = root / "wenqu-image-assets" / "styles"
-    documentation_root = root / "wenqu-image"
+def _check_asset_references(root: Path, config: EvalConfig, diagnostics: list[Diagnostic]) -> None:
+    settings = _release_settings(config).get("assetReferences")
+    if not isinstance(settings, Mapping):
+        return
+    asset_directory = settings.get("assetDirectory")
+    documentation_directory = settings.get("documentationDirectory")
+    reference_prefix = settings.get("referencePrefix")
+    if not all(isinstance(value, str) for value in (asset_directory, documentation_directory, reference_prefix)):
+        return
+    asset_root = root / asset_directory
+    documentation_root = root / documentation_directory
     documentation = "\n".join(
         _read_optional_text(path) for path in _walk_files(documentation_root) if path.suffix.lower() in {".md", ".sh"}
     )
@@ -390,14 +446,18 @@ def _check_wenqu_image_assets(root: Path, diagnostics: list[Diagnostic]) -> None
         return
     assets = list(_walk_files(asset_root, _IMAGE_EXTENSIONS))
     referenced_assets: set[Path] = set()
-    for match in _WENQU_IMAGE_REFERENCE.finditer(documentation):
+    reference_pattern = re.compile(
+        rf"{re.escape(reference_prefix.rstrip('/'))}/([A-Za-z0-9._/-]+\.(?:png|jpe?g|webp|gif|svg))",
+        re.IGNORECASE,
+    )
+    for match in reference_pattern.finditer(documentation):
         relative_asset = Path(match.group(1))
         resolved_asset = (asset_root / relative_asset).resolve()
         if not _is_within(asset_root.resolve(), resolved_asset) or not resolved_asset.is_file():
             _fail(
                 diagnostics,
                 "IMAGE_REFERENCE_MISSING",
-                f"Image reference has no matching asset: wenqu-image-assets/styles/{relative_asset.as_posix()}",
+                f"Image reference has no matching asset: {reference_prefix.rstrip('/')}/{relative_asset.as_posix()}",
                 asset_root,
             )
         else:
@@ -413,7 +473,7 @@ def _check_wenqu_image_assets(root: Path, diagnostics: list[Diagnostic]) -> None
             _fail(
                 diagnostics,
                 "IMAGE_ASSET_UNREFERENCED",
-                f"Image asset is not referenced by Wenqu image documentation: {relative_asset}",
+                f"Image asset is not referenced by configured documentation: {relative_asset}",
                 asset,
             )
 
