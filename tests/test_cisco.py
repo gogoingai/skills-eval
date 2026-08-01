@@ -236,6 +236,62 @@ def test_cisco_adapter_uses_supported_options_and_deletes_temporary_output(
     assert not output_path.exists()
 
 
+def test_cisco_adapter_uses_scanner_from_current_virtual_environment(
+    monkeypatch, tmp_path
+) -> None:
+    virtual_bin = tmp_path / "bin"
+    virtual_bin.mkdir()
+    python_executable = virtual_bin / "python"
+    scanner_executable = virtual_bin / "skill-scanner"
+    python_executable.touch()
+    scanner_executable.touch()
+    observed_args: list[str] = []
+
+    def fake_run(args):
+        observed_args.extend(args)
+        _write_scanner_output(args, {"findings": []})
+        return 0, "", ""
+
+    monkeypatch.setattr(sys, "executable", str(python_executable))
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.setattr("skills_eval.security.cisco.run_scanner", fake_run)
+
+    outcome = CiscoScanner().scan(tmp_path, {})
+
+    assert outcome.status is Severity.PASS
+    assert observed_args[0] == str(scanner_executable)
+
+
+def test_cisco_adapter_keeps_virtual_environment_bin_for_symlinked_python(
+    monkeypatch, tmp_path
+) -> None:
+    virtual_bin = tmp_path / "tool-environment" / "bin"
+    shared_bin = tmp_path / "shared-runtime" / "bin"
+    virtual_bin.mkdir(parents=True)
+    shared_bin.mkdir(parents=True)
+    shared_python = shared_bin / "python"
+    shared_python.touch()
+    python_executable = virtual_bin / "python"
+    python_executable.symlink_to(shared_python)
+    scanner_executable = virtual_bin / "skill-scanner"
+    scanner_executable.touch()
+    observed_args: list[str] = []
+
+    def fake_run(args):
+        observed_args.extend(args)
+        _write_scanner_output(args, {"findings": []})
+        return 0, "", ""
+
+    monkeypatch.setattr(sys, "executable", str(python_executable))
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.setattr("skills_eval.security.cisco.run_scanner", fake_run)
+
+    outcome = CiscoScanner().scan(tmp_path, {})
+
+    assert outcome.status is Severity.PASS
+    assert observed_args[0] == str(scanner_executable)
+
+
 def test_cisco_adapter_rejects_unknown_option_keys(monkeypatch, tmp_path) -> None:
     called = False
 

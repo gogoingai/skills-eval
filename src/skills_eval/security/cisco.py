@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 from threading import Lock, Thread
 from typing import Any
@@ -119,7 +121,7 @@ class CiscoScanner:
                 output_path = Path(output.name)
 
             args = [
-                self.executable,
+                _resolve_executable(self.executable),
                 "scan",
                 str(skill_path),
                 "--format",
@@ -246,6 +248,19 @@ def _validate_options(options: dict[str, object]) -> str | None:
     if not isinstance(use_behavioral, bool):
         return "Cisco option 'useBehavioral' must be a boolean."
     return None
+
+
+def _resolve_executable(executable: str) -> str:
+    """Find a scanner installed beside the current virtual-environment Python.
+
+    pipx and uv tool environments install dependency entry points in their own
+    ``bin`` directory but do not always expose that directory to child-process
+    ``PATH`` lookups.
+    """
+    if shutil.which(executable) is not None:
+        return executable
+    bundled = Path(sys.executable).parent / executable
+    return str(bundled) if bundled.is_file() else executable
 
 
 def _normalize_findings(payload: Any) -> tuple[SecurityFinding, ...]:
