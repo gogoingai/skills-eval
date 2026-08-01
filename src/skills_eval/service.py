@@ -19,6 +19,7 @@ from skills_eval.models import (
     highest_severity,
     highest_status,
 )
+from skills_eval.publishing_checks import run_publishing_checks
 from skills_eval.security import (
     ExecutionDiagnostic,
     ScannerRegistry,
@@ -26,7 +27,9 @@ from skills_eval.security import (
 )
 
 
-def run_check(root: Path, selector: str | None, dry_run: bool) -> CheckResult:
+def run_check(
+    root: Path, selector: str | None, dry_run: bool, external: bool = False
+) -> CheckResult:
     """Run configured format and security checks in deterministic order."""
     root = root.resolve()
 
@@ -51,6 +54,7 @@ def run_check(root: Path, selector: str | None, dry_run: bool) -> CheckResult:
             security_sources=enabled_sources,
             publishing_targets=enabled_publishing_targets,
             format_checks=format_rules,
+            external_checks_requested=external,
         )
 
     selected_skills, selection_diagnostics = select_skill(plugin, selector)
@@ -61,6 +65,14 @@ def run_check(root: Path, selector: str | None, dry_run: bool) -> CheckResult:
         _associate_format_diagnostics(selected_skills, format_diagnostics)
     )
     global_diagnostics.extend(repository_format_diagnostics)
+
+    publishing_checks = run_publishing_checks(
+        root,
+        tuple(selected_skills),
+        enabled_publishing_targets,
+        dry_run=dry_run,
+        requested=external,
+    )
 
     scanner_entries: list[tuple[str, SecurityScanner, dict[str, object]]] = []
     scanner_creation_failed = False
@@ -143,6 +155,8 @@ def run_check(root: Path, selector: str | None, dry_run: bool) -> CheckResult:
         security_sources=enabled_sources,
         publishing_targets=enabled_publishing_targets,
         format_checks=format_rules,
+        publishing_checks=publishing_checks,
+        external_checks_requested=external,
     )
 
 

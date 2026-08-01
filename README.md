@@ -22,6 +22,10 @@ skills-eval check . --skill wenqu-write
 # Show the selected scope and format checks without running security scanners
 # or writing a report.
 skills-eval check . --dry-run
+
+# Before releasing to a configured platform, also run its native validator.
+# This validates only: it never publishes a Skill or package.
+skills-eval check . --external
 ```
 
 A normal run prints a compact summary and writes `skills-eval-report.md` in the
@@ -87,6 +91,24 @@ target-specific behavior such as external validation and dry runs.
 Security sources are a configured list so future scanners can be added without
 changing the command interface.
 
+## Native platform validation
+
+The regular check is safe for local development and GitHub Actions. Before a
+platform release, add `--external` to run native checks for the enabled
+publishing targets:
+
+- `claude-plugin`: `claude plugin validate .`
+- `workbuddy`: `codebuddy plugin validate .claude-plugin/marketplace.json`
+- `skillhub`: `skillhub publish <selected-skill> --dry-run`
+- `clawhub`: `clawhub package validate .`
+
+`openclaw` currently has no separate native CLI validation. Missing tools,
+login failures, and network errors are reported as an **external publishing
+validation** environment failure, never as a Skill security finding. Use
+`CODEBUDDY_BIN`, `SKILLHUB_BIN`, or `CLAWHUB_BIN` when a CLI is not on `PATH`.
+The SkillHub command always includes `--dry-run`; Skills Eval never invokes a
+publish command without that platform-provided safety flag.
+
 `report.language` accepts `auto` (the default), `zh`, or `en`. In `auto` mode,
 Skills Eval reads the computer's preferred language: Chinese preferences render
 the report in Chinese; every other preference renders it in English.
@@ -122,7 +144,7 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
-      - uses: gogoingai/skills-eval@v0.1.8
+      - uses: gogoingai/skills-eval@v0.1.9
         with:
           path: .
 ```
@@ -138,3 +160,14 @@ GitHub can deny comment write access; the audit and artifact still complete
 because commenting is non-fatal. Set `comment: false` to disable PR comments.
 The caller controls triggers; this Action never publishes a package, creates a
 tag, or changes repository files.
+
+Set `external: true` only on a protected, release-only workflow runner that has
+the required platform CLIs and credentials. It is `false` by default, so PR
+checks remain portable:
+
+```yaml
+      - uses: gogoingai/skills-eval@v0.1.9
+        with:
+          path: .
+          external: true
+```

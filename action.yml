@@ -14,10 +14,14 @@ inputs:
     description: Set to true to skip security scanning and report generation.
     required: false
     default: "false"
+  external:
+    description: Run native publishing-platform validations; never publishes.
+    required: false
+    default: "false"
   version:
     description: PyPI requirement used to run Skills Eval.
     required: false
-    default: skills-eval>=0.1.8,<0.2
+    default: skills-eval>=0.1.9,<0.2
   comment:
     description: Update one summary comment when the workflow runs for a pull request.
     required: false
@@ -45,6 +49,7 @@ runs:
         INPUT_PATH: ${{ inputs.path }}
         INPUT_SKILL: ${{ inputs.skill }}
         INPUT_DRY_RUN: ${{ inputs.dry-run }}
+        INPUT_EXTERNAL: ${{ inputs.external }}
         INPUT_VERSION: ${{ inputs.version }}
       run: |
         set +e
@@ -58,6 +63,9 @@ runs:
         else
           report_path="$(cd "$INPUT_PATH" && pwd)/skills-eval-report.md"
           echo "report-path=$report_path" >> "$GITHUB_OUTPUT"
+        fi
+        if [[ "$INPUT_EXTERNAL" == "true" ]]; then
+          command+=(--external)
         fi
         "${command[@]}"
         echo "exit-code=$?" >> "$GITHUB_OUTPUT"

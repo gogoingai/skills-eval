@@ -5,7 +5,14 @@ from types import MappingProxyType
 
 import pytest
 
-from skills_eval.models import CheckResult, CheckStatus, Diagnostic, Severity, Skill
+from skills_eval.models import (
+    CheckResult,
+    CheckStatus,
+    Diagnostic,
+    PublishingCheckResult,
+    Severity,
+    Skill,
+)
 from skills_eval.reporting import render_terminal, write_markdown_report
 
 
@@ -98,6 +105,38 @@ def test_terminal_summary_includes_repository_diagnostics() -> None:
 
     assert "Repository diagnostics:" in terminal
     assert "[FAIL] CONFIG_INVALID: Bad config" in terminal
+
+
+def test_reports_external_publishing_validation_separately_from_security(tmp_path) -> None:
+    result = CheckResult(
+        plugin_name="example",
+        report_language="zh",
+        external_checks_requested=True,
+        publishing_checks=(
+            PublishingCheckResult(
+                target="skillhub",
+                command=("skillhub", "publish", "/repo/write", "--dry-run"),
+                status=Severity.PASS,
+            ),
+            PublishingCheckResult(
+                target="clawhub",
+                command=("clawhub", "package", "validate", "."),
+                status=Severity.FAIL,
+                message="Validation command exited with status 1.",
+            ),
+        ),
+    )
+    output = tmp_path / "report.md"
+
+    write_markdown_report(result, output)
+
+    text = output.read_text(encoding="utf-8")
+    assert "## 外部发布校验" in text
+    assert "[PASS] skillhub" in text
+    assert "[FAIL] clawhub" in text
+    assert "## 安全问题" in text
+    assert "clawhub" not in text.split("## 安全问题", 1)[1]
+    assert "External publishing checks:" in render_terminal(result)
 
 
 @pytest.mark.parametrize(

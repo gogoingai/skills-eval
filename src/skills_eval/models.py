@@ -92,6 +92,20 @@ class SkillResult:
 
 
 @dataclass(frozen=True)
+class PublishingCheckResult:
+    """Outcome of an opt-in native publishing-platform validation."""
+
+    target: str
+    command: tuple[str, ...]
+    status: Severity | None
+    message: str | None = None
+    execution_error: bool = False
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "command", tuple(self.command))
+
+
+@dataclass(frozen=True)
 class CheckResult:
     plugin_name: str
     root_path: Path | None = None
@@ -106,6 +120,8 @@ class CheckResult:
     security_sources: tuple[Mapping[str, object], ...] = ()
     publishing_targets: tuple[Mapping[str, object], ...] = ()
     format_checks: tuple[str, ...] = ()
+    publishing_checks: tuple[PublishingCheckResult, ...] = ()
+    external_checks_requested: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "skills", tuple(self.skills))
@@ -120,6 +136,7 @@ class CheckResult:
         object.__setattr__(self, "security_sources", tuple(self.security_sources))
         object.__setattr__(self, "publishing_targets", tuple(self.publishing_targets))
         object.__setattr__(self, "format_checks", tuple(self.format_checks))
+        object.__setattr__(self, "publishing_checks", tuple(self.publishing_checks))
 
     @property
     def severity(self) -> Severity:
@@ -133,7 +150,10 @@ class CheckResult:
             for item in (*self.diagnostics, *self.findings, *nested_items)
         )
         skill_severities = tuple(skill.severity for skill in self.skills)
-        return highest_status((*item_severities, *skill_severities))
+        publishing_severities = tuple(
+            check.status or Severity.PASS for check in self.publishing_checks
+        )
+        return highest_status((*item_severities, *skill_severities, *publishing_severities))
 
     @property
     def status(self) -> CheckStatus:
@@ -150,6 +170,8 @@ class CheckResult:
             ),
         )
         if any(_uses_error_exit_code(diagnostic) for diagnostic in diagnostics):
+            return 2
+        if any(check.execution_error for check in self.publishing_checks):
             return 2
         return 1 if self.status is CheckStatus.NOT_READY else 0
 

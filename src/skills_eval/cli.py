@@ -38,9 +38,14 @@ def check(
     path: Path = typer.Argument(..., exists=True, file_okay=False, readable=True),
     skill: str | None = typer.Option(None, "--skill", help="Check one Skill by directory or name."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show planned checks without scanning or writing a report."),
+    external: bool = typer.Option(
+        False,
+        "--external",
+        help="Run configured native publishing-platform validations; never publishes.",
+    ),
 ) -> None:
     """Check a Claude Plugin repository before release."""
-    result = run_check(path, selector=skill, dry_run=dry_run)
+    result = run_check(path, selector=skill, dry_run=dry_run, external=external)
     typer.echo(render_terminal(result))
     if not dry_run:
         report_path = path.resolve() / "skills-eval-report.md"

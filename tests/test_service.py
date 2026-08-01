@@ -55,6 +55,39 @@ def test_dry_run_discovers_checks_but_never_invokes_scanner(
     assert result.skills[0].security_status is None
 
 
+def test_external_checks_only_receive_enabled_publishing_targets(
+    plugin_factory,
+    monkeypatch,
+) -> None:
+    root = plugin_factory()
+    (root / ".skills-eval.json").write_text(
+        json.dumps(
+            {
+                "schemaVersion": 1,
+                "publishing": {
+                    "targets": [
+                        {"name": "claude-plugin", "enabled": True},
+                        {"name": "skillhub", "enabled": False},
+                    ]
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    def record_checks(root, skills, targets, **kwargs):
+        captured.update(skills=skills, targets=targets, kwargs=kwargs)
+        return ()
+
+    monkeypatch.setattr("skills_eval.service.run_publishing_checks", record_checks)
+
+    run_check(root, selector=None, dry_run=True, external=True)
+
+    assert [target["name"] for target in captured["targets"]] == ["claude-plugin"]
+    assert captured["kwargs"] == {"dry_run": True, "requested": True}
+
+
 def test_selector_scans_only_the_selected_skill_with_configured_options(
     plugin_factory,
     monkeypatch,

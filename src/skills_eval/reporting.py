@@ -9,7 +9,14 @@ import os
 from pathlib import Path
 import tempfile
 
-from skills_eval.models import CheckResult, Diagnostic, Finding, Severity, Skill
+from skills_eval.models import (
+    CheckResult,
+    Diagnostic,
+    Finding,
+    PublishingCheckResult,
+    Severity,
+    Skill,
+)
 from skills_eval.security import SecurityFinding
 
 
@@ -40,6 +47,7 @@ def render_terminal(result: CheckResult) -> str:
     if result.diagnostics:
         lines.extend(("Repository diagnostics:",))
         lines.extend(_terminal_diagnostic_line(diagnostic) for diagnostic in result.diagnostics)
+    _append_terminal_publishing_checks(lines, result)
     lines.append(f"Result: {result.status.value}")
     if result.dry_run:
         scanners = ", ".join(result.planned_security_sources) or "none"
@@ -108,6 +116,7 @@ def _render_markdown_zh(result: CheckResult, path: Path) -> str:
     else:
         lines.append("本次没有记录格式检查明细。")
     _append_publishing_targets(lines, result, "zh")
+    _append_publishing_checks(lines, result, "zh")
     lines.extend(
         (
             "",
@@ -209,6 +218,7 @@ def _render_markdown_en(result: CheckResult, path: Path) -> str:
         lines.append("Format check details were not recorded for this run.")
 
     _append_publishing_targets(lines, result, "en")
+    _append_publishing_checks(lines, result, "en")
 
     lines.extend(("", "## Skill results", ""))
     if not result.skills:
@@ -480,6 +490,59 @@ def _append_publishing_targets(lines: list[str], result: CheckResult, language: 
         lines.append(no_targets)
     else:
         lines.extend(f"- {_markdown(target)}" for target in targets)
+
+
+def _append_terminal_publishing_checks(lines: list[str], result: CheckResult) -> None:
+    if not result.external_checks_requested:
+        return
+    lines.append("External publishing checks:")
+    if not result.publishing_checks:
+        lines.append("  (no enabled publishing targets have native validators)")
+        return
+    for check in result.publishing_checks:
+        status = check.status.value if check.status is not None else "PLANNED"
+        command = " ".join(check.command)
+        suffix = f" — {check.message}" if check.message and check.message != "planned" else ""
+        lines.append(f"  - {check.target}: {status} — {command}{suffix}")
+
+
+def _append_publishing_checks(
+    lines: list[str], result: CheckResult, language: str
+) -> None:
+    heading = "## External publishing validation" if language == "en" else "## 外部发布校验"
+    if not result.external_checks_requested:
+        message = (
+            "Not run. Use `skills-eval check . --external` before a platform release."
+            if language == "en"
+            else "未执行。发布到平台前，请运行 `skills-eval check . --external`。"
+        )
+        lines.extend(("", heading, "", message))
+        return
+
+    lines.extend(("", heading, ""))
+    if not result.publishing_checks:
+        lines.append(
+            "No enabled publishing targets have a native validator."
+            if language == "en"
+            else "没有已启用的发布目标提供原生校验。"
+        )
+        return
+
+    for check in result.publishing_checks:
+        _append_publishing_check(lines, check, language)
+
+
+def _append_publishing_check(
+    lines: list[str], check: PublishingCheckResult, language: str
+) -> None:
+    status = check.status.value if check.status is not None else "PLANNED"
+    command = " ".join(check.command)
+    lines.append(
+        f"- [{status}] {_markdown(check.target)}: `{_markdown(command)}`"
+    )
+    if check.message and check.message != "planned":
+        label = "Detail" if language == "en" else "说明"
+        lines.append(f"  - {label}: {_markdown(check.message)}")
 
 
 def _json(value: object) -> str:
