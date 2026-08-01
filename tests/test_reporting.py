@@ -140,7 +140,14 @@ def test_reports_external_publishing_validation_separately_from_security(tmp_pat
             ),
             PublishingCheckResult(
                 target="clawhub",
-                command=("clawhub", "package", "validate", "."),
+                command=(
+                    "clawhub",
+                    "package",
+                    "validate",
+                    ".",
+                    "--out",
+                    "<temporary directory>",
+                ),
                 status=Severity.FAIL,
                 message="Validation command exited with status 1.",
             ),

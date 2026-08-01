@@ -29,7 +29,11 @@ def test_external_dry_run_plans_fixed_non_publishing_validation_commands() -> No
         ("workbuddy", None, results[1].command),
         ("skillhub", None, ("skillhub", "publish", "/repo/write", "--dry-run")),
         ("skillhub", None, ("skillhub", "publish", "/repo/translate", "--dry-run")),
-        ("clawhub", None, ("clawhub", "package", "validate", ".")),
+        (
+            "clawhub",
+            None,
+            ("clawhub", "package", "validate", ".", "--out", "<temporary directory>"),
+        ),
     ]
     assert results[1].command[1:] == (
         "plugin", "validate", ".claude-plugin/marketplace.json"
@@ -79,6 +83,42 @@ def test_missing_external_cli_is_an_environment_error(monkeypatch) -> None:
     assert results[0].status is Severity.FAIL
     assert results[0].execution_error is True
     assert "Required executable was not found" in str(results[0].message)
+
+
+def test_clawhub_validation_uses_and_cleans_a_temporary_output_directory(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "skills_eval.publishing_checks._executable_exists", lambda command: True
+    )
+    calls: list[tuple[str, ...]] = []
+
+    def runner(command, root):
+        del root
+        calls.append(tuple(command))
+        output_directory = Path(command[-1])
+        assert command[-2:] == ("--out", str(output_directory))
+        assert output_directory.is_dir()
+        return subprocess.CompletedProcess(command, 0, "ok", "")
+
+    results = run_publishing_checks(
+        Path("/repo"),
+        (),
+        _targets("clawhub"),
+        dry_run=False,
+        requested=True,
+        command_runner=runner,
+    )
+
+    assert calls[0][:4] == ("clawhub", "package", "validate", ".")
+    assert calls[0][-2] == "--out"
+    assert not Path(calls[0][-1]).exists()
+    assert results[0].command == (
+        "clawhub",
+        "package",
+        "validate",
+        ".",
+        "--out",
+        "<temporary directory>",
+    )
 
 
 def test_external_validator_failure_is_reported_as_a_validation_failure(monkeypatch) -> None:

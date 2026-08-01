@@ -107,7 +107,7 @@ publishing targets:
 - `claude-plugin`: `claude plugin validate .`
 - `workbuddy`: `codebuddy plugin validate .claude-plugin/marketplace.json`
 - `skillhub`: `skillhub publish <selected-skill> --dry-run`
-- `clawhub`: `clawhub package validate .`
+- `clawhub`: `clawhub package validate . --out <temporary directory>`
 
 `openclaw` currently has no separate native CLI validation. Use
 `--external-target <name>` repeatedly to select only configured and enabled
@@ -153,7 +153,7 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
-      - uses: gogoingai/skills-eval@v0.1.11
+      - uses: gogoingai/skills-eval@v0.1.12
         with:
           path: .
 ```
@@ -175,7 +175,7 @@ the corresponding CLIs on the runner, then records exactly these commands in
 the report. This does not need a marketplace credential:
 
 ```yaml
-      - uses: gogoingai/skills-eval@v0.1.11
+      - uses: gogoingai/skills-eval@v0.1.12
         with:
           path: .
           external-targets: claude-plugin,workbuddy,clawhub

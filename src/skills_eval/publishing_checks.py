@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -35,6 +36,14 @@ class PublishingValidation:
 
     target: str
     command: tuple[str, ...]
+    temporary_output: bool = False
+
+    @property
+    def displayed_command(self) -> tuple[str, ...]:
+        """Return a report-safe command representation."""
+        if not self.temporary_output:
+            return self.command
+        return (*self.command, "--out", "<temporary directory>")
 
 
 class PublishingCheckRegistry:
@@ -88,7 +97,7 @@ def run_publishing_checks(
                 results.append(
                     PublishingCheckResult(
                         target=name,
-                        command=validation.command,
+                        command=validation.displayed_command,
                         status=None,
                         message="planned",
                     )
@@ -107,17 +116,36 @@ def _execute(
     if not _executable_exists(executable):
         return PublishingCheckResult(
             target=validation.target,
-            command=validation.command,
+            command=validation.displayed_command,
             status=Severity.FAIL,
             message=f"Required executable was not found: {executable!r}.",
             execution_error=True,
         )
+    if validation.temporary_output:
+        with tempfile.TemporaryDirectory(
+            prefix="skills-eval-clawhub-"
+        ) as output_directory:
+            return _run_validation(
+                validation,
+                (*validation.command, "--out", output_directory),
+                root,
+                command_runner,
+            )
+    return _run_validation(validation, validation.command, root, command_runner)
+
+
+def _run_validation(
+    validation: PublishingValidation,
+    command: tuple[str, ...],
+    root: Path,
+    command_runner: CommandRunner,
+) -> PublishingCheckResult:
     try:
-        completed = command_runner(validation.command, root)
+        completed = command_runner(command, root)
     except OSError as error:
         return PublishingCheckResult(
             target=validation.target,
-            command=validation.command,
+            command=validation.displayed_command,
             status=Severity.FAIL,
             message=f"Could not run external validation: {error}",
             execution_error=True,
@@ -125,13 +153,13 @@ def _execute(
     if completed.returncode == 0:
         return PublishingCheckResult(
             target=validation.target,
-            command=validation.command,
+            command=validation.displayed_command,
             status=Severity.PASS,
         )
     output = (completed.stderr or completed.stdout or "").strip()
     return PublishingCheckResult(
         target=validation.target,
-        command=validation.command,
+        command=validation.displayed_command,
         status=Severity.FAIL,
         message=(
             f"Validation command exited with status {completed.returncode}."
@@ -192,7 +220,13 @@ def _clawhub(
 ) -> tuple[PublishingValidation, ...]:
     del skills, options
     command = os.environ.get("CLAWHUB_BIN") or "clawhub"
-    return (PublishingValidation("clawhub", (command, "package", "validate", ".")),)
+    return (
+        PublishingValidation(
+            "clawhub",
+            (command, "package", "validate", "."),
+            temporary_output=True,
+        ),
+    )
 
 
 PublishingCheckRegistry.register("claude-plugin", _claude_plugin)

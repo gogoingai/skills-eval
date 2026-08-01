@@ -25,7 +25,7 @@ inputs:
   version:
     description: PyPI requirement used to run Skills Eval.
     required: false
-    default: skills-eval>=0.1.11,<0.2
+    default: skills-eval>=0.1.12,<0.2
   comment:
     description: Update one summary comment when the workflow runs for a pull request.
     required: false
