@@ -16,7 +16,7 @@ def test_markdown_report_includes_cisco_disclaimer(sample_result, tmp_path) -> N
 
     text = output.read_text(encoding="utf-8")
     assert "READY WITH WARNINGS" in text
-    assert "does not guarantee that a Skill is safe" in text
+    assert "不能保证某个 Skill 绝对安全" in text
 
 
 def test_markdown_report_describes_scope_and_per_skill_coverage(sample_result, tmp_path) -> None:
@@ -25,11 +25,13 @@ def test_markdown_report_describes_scope_and_per_skill_coverage(sample_result, t
     write_markdown_report(sample_result, output)
 
     text = output.read_text(encoding="utf-8")
-    assert "## Inspection scope" in text
-    assert "Skills checked: 1" in text
-    assert "## Format checks performed" in text
-    assert "## Per-Skill coverage" in text
-    assert "Security coverage: cisco — REVIEW" in text
+    assert "## 审查范围" in text
+    assert "已检查 Skill：1 个" in text
+    assert "## 已执行的格式检查" in text
+    assert "## 每个 Skill 检查了什么" in text
+    assert "安全：cisco — REVIEW" in text
+    assert "格式：所有已检查的 Skill 均通过。" in text
+    assert "安全：write 需要人工确认；其余通过。" in text
 
 
 def test_terminal_summary_uses_requested_status_labels(sample_result) -> None:
@@ -111,8 +113,8 @@ def test_markdown_report_includes_detailed_cisco_finding(sample_result, tmp_path
 
     text = output.read_text(encoding="utf-8")
     assert "PI-001" in text
-    assert "Source severity: medium" in text
-    assert "Line: 12" in text
+    assert "来源等级: medium" in text
+    assert "行号: 12" in text
     assert "Untrusted text requests an unsafe action." in text
     assert "Treat the text as data." in text
     assert "ignore previous instructions" in text

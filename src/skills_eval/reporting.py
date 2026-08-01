@@ -14,8 +14,7 @@ from skills_eval.security import SecurityFinding
 
 
 _CISCO_DISCLAIMER = (
-    "Cisco AI Skill Scanner is a best-effort tool and does not guarantee "
-    "that a Skill is safe."
+    "Cisco AI Skill Scanner 只能提供辅助判断，不能保证某个 Skill 绝对安全。"
 )
 
 
@@ -69,75 +68,79 @@ def write_markdown_report(result: CheckResult, path: Path) -> None:
 
 def _render_markdown(result: CheckResult, path: Path) -> str:
     lines = [
-        "# Skills evaluation report",
+        "# Skills 审查报告",
         "",
-        "## Run metadata",
+        "## 本次结论",
         "",
-        f"- Plugin: {_markdown(result.plugin_name)}",
-        f"- Result: {result.status.value}",
-        f"- Dry run: {'yes' if result.dry_run else 'no'}",
-        f"- Report path: {_markdown(path)}",
+        f"- 插件：{_markdown(result.plugin_name)}",
+        f"- 审查结果：{result.status.value}",
+        f"- 发布建议：{_release_recommendation(result)}",
+        f"- 演练模式：{'是（未执行安全扫描）' if result.dry_run else '否'}",
         "",
-        "## Inspection scope",
+        "## 一句话总结",
         "",
-        f"- Target directory: {_markdown(result.root_path) if result.root_path else 'not recorded'}",
-        f"- Requested Skill: {_markdown(result.selector) if result.selector else 'all discovered Skills'}",
-        f"- Skills checked: {len(result.skills)}",
-        "- Security scan scope: each checked Skill directory, recursively.",
+        *_plain_summary(result),
         "",
-        "## Format checks performed",
+        "## 审查范围",
+        "",
+        f"- 目标目录：{_markdown(result.root_path) if result.root_path else '未记录'}",
+        f"- 指定 Skill：{_markdown(result.selector) if result.selector else '全部已发现的 Skill'}",
+        f"- 已检查 Skill：{len(result.skills)} 个",
+        "- 安全扫描范围：逐个递归扫描已检查的 Skill 目录。",
+        "",
+        "## 已执行的格式检查",
         "",
     ]
     if result.format_checks:
         lines.extend(f"- {_markdown(rule)}" for rule in result.format_checks)
     else:
-        lines.append("Format check details were not recorded for this run.")
+        lines.append("本次没有记录格式检查明细。")
     lines.extend(
         (
             "",
-            "## Per-Skill coverage",
+            "## 每个 Skill 检查了什么",
             "",
         )
     )
     if not result.skills:
-        lines.append("No Skills were selected for checking.")
+        lines.append("没有选中任何 Skill。")
     else:
         for skill in result.skills:
             lines.extend(
                 (
                     f"### {_markdown(skill.name)}",
                     "",
-                    f"- Directory: {_markdown(skill.path)}",
-                    "- Format coverage: SKILL.md, frontmatter, local references, and configured file rules.",
-                    f"- Security coverage: {_security_coverage(result, skill)}",
+                    f"- 目录：{_markdown(skill.path)}",
+                    "- 格式：SKILL.md、frontmatter、本地引用和已配置的文件规则。",
+                    f"- 安全：{_security_coverage(result, skill)}",
                     "",
                 )
             )
     lines.extend(
         (
-            "## Discovered Skills",
+            "## 逐项结果",
             "",
         )
     )
     if not result.skills:
-        lines.append("No Skills were discovered.")
+        lines.append("未发现任何 Skill。")
     else:
         for skill in result.skills:
             lines.extend(
                 (
                     f"### {_markdown(skill.name)}",
                     "",
-                    f"- Path: {_markdown(skill.path)}",
-                    f"- Format: {skill.format_status.value}",
-                    f"- Security: {_security_status(skill)}",
+                    f"- 目录：{_markdown(skill.path)}",
+                    f"- 格式：{skill.format_status.value}",
+                    f"- 安全：{_security_status(skill)}",
                     "",
                 )
             )
 
-    lines.extend(("## Enabled security scanners", ""))
+    lines.extend(("## 已启用的安全扫描器", ""))
     sources = tuple(source for source in result.security_sources if _is_enabled(source))
     if not sources:
-        lines.append("No security scanners are enabled.")
+        lines.append("没有启用安全扫描器。")
     else:
         for source in sources:
             name = source.get("name", "unknown")
@@ -145,20 +148,20 @@ def _render_markdown(result: CheckResult, path: Path) -> str:
             lines.append(f"- {_markdown(name)}: {_markdown(_json(options))}")
     lines.append("")
 
-    lines.extend(("## Status summary", "", f"Overall result: {result.status.value}", ""))
+    lines.extend(("## 汇总", "", f"整体结果：{result.status.value}", ""))
     for skill in result.skills:
         lines.append(
-            f"- {_markdown(skill.name)} — Format: {skill.format_status.value}; "
-            f"Security: {_security_status(skill)}"
+            f"- {_markdown(skill.name)}：格式 {skill.format_status.value}；"
+            f"安全 {_security_status(skill)}"
         )
     lines.append("")
 
     format_diagnostics, security_diagnostics = _group_diagnostics(result)
-    lines.extend(("## Format diagnostics", ""))
+    lines.extend(("## 格式问题", ""))
     _append_grouped_diagnostics(lines, format_diagnostics)
-    lines.extend(("", "## Security findings", ""))
+    lines.extend(("", "## 安全问题", ""))
     _append_security_details(lines, result, security_diagnostics)
-    lines.extend(("", "## Cisco scanner disclaimer", "", _CISCO_DISCLAIMER, ""))
+    lines.extend(("", "## Cisco 扫描器说明", "", _CISCO_DISCLAIMER, ""))
     return "\n".join(lines)
 
 
@@ -181,7 +184,7 @@ def _append_grouped_diagnostics(
     lines: list[str], diagnostics: dict[str, list[Diagnostic]]
 ) -> None:
     if not diagnostics:
-        lines.append("No format diagnostics.")
+        lines.append("未发现格式问题。")
         return
     for group, group_diagnostics in diagnostics.items():
         lines.extend((f"### {_markdown(group)}", ""))
@@ -213,13 +216,13 @@ def _append_security_details(
     repository_diagnostics = diagnostics.get("Repository", [])
     if repository_diagnostics:
         has_content = True
-        lines.extend(("### Repository", ""))
+        lines.extend(("### 仓库级问题", ""))
         for diagnostic in repository_diagnostics:
             lines.append(_diagnostic_line(diagnostic))
         lines.append("")
 
     if not has_content:
-        lines.append("No security findings.")
+        lines.append("未发现安全问题。")
     elif lines[-1] == "":
         lines.pop()
 
@@ -227,17 +230,17 @@ def _append_security_details(
 def _append_finding(lines: list[str], finding: Finding) -> None:
     lines.append(
         f"- [{finding.severity.value}] {_markdown(finding.code)}: "
-        f"{_markdown(finding.message)}{_location(finding.path)}"
+        f"{_markdown(_finding_summary(finding))}{_location(finding.path)}"
     )
     if isinstance(finding, SecurityFinding):
         details = (
-            ("Source", finding.source),
-            ("Rule", finding.rule_id),
-            ("Source severity", finding.source_severity),
-            ("Line", finding.line),
-            ("Detail", finding.detail),
-            ("Remediation", finding.remediation),
-            ("Evidence", finding.evidence),
+            ("来源", finding.source),
+            ("规则", finding.rule_id),
+            ("来源等级", finding.source_severity),
+            ("行号", finding.line),
+            ("原始详情", finding.detail),
+            ("原始建议", finding.remediation),
+            ("原始证据", finding.evidence),
         )
         for label, value in details:
             if value is not None and value != "":
@@ -266,16 +269,59 @@ def _security_status(skill: Skill) -> str:
 
 def _security_coverage(result: CheckResult, skill: Skill) -> str:
     if result.dry_run:
-        sources = ", ".join(result.planned_security_sources) or "no enabled scanners"
-        return f"not run (dry run; planned: {_markdown(sources)})"
+        sources = ", ".join(result.planned_security_sources) or "没有启用扫描器"
+        return f"未执行（演练模式；计划使用：{_markdown(sources)}）"
     sources = ", ".join(
         str(source.get("name", "unknown"))
         for source in result.security_sources
         if _is_enabled(source)
     )
     if not sources:
-        return "no enabled scanners"
+        return "没有启用扫描器"
     return f"{_markdown(sources)} — {_security_status(skill)}"
+
+
+def _finding_summary(finding: Finding) -> str:
+    summaries = {
+        "FILE_MAGIC_MISMATCH": "文件扩展名与扫描器识别的内容类型不一致，需要人工确认。",
+        "PYCACHE_FILES_DETECTED": "发现 Python 缓存文件，不应随 Skill 一起发布。",
+    }
+    return summaries.get(finding.code, finding.message)
+
+
+def _release_recommendation(result: CheckResult) -> str:
+    if result.status.value == "READY":
+        return "可以发布"
+    if result.status.value == "READY WITH WARNINGS":
+        return "可以发布，但请先查看“安全问题”中的 REVIEW 项"
+    return "暂不建议发布；请先处理“格式问题”或“安全问题”"
+
+
+def _plain_summary(result: CheckResult) -> tuple[str, str]:
+    format_failures = [skill.name for skill in result.skills if skill.format_status is Severity.FAIL]
+    if format_failures:
+        format_summary = f"- 格式：{', '.join(format_failures)} 未通过，需要修复。"
+    else:
+        format_summary = "- 格式：所有已检查的 Skill 均通过。"
+
+    if result.dry_run:
+        security_summary = "- 安全：演练模式，尚未执行安全扫描。"
+    else:
+        reviews = [
+            skill.name
+            for skill in result.skills
+            if skill.security_status is Severity.REVIEW
+        ]
+        failures = [
+            skill.name for skill in result.skills if skill.security_status is Severity.FAIL
+        ]
+        if failures:
+            security_summary = f"- 安全：{', '.join(failures)} 未通过，需要修复。"
+        elif reviews:
+            security_summary = f"- 安全：{', '.join(reviews)} 需要人工确认；其余通过。"
+        else:
+            security_summary = "- 安全：所有已检查的 Skill 均通过。"
+    return format_summary, security_summary
 
 
 def _is_enabled(source: Mapping[str, object]) -> bool:

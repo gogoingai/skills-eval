@@ -160,18 +160,18 @@ def _source_options(source: Mapping[str, object]) -> dict[str, object]:
 def _format_rules(config: EvalConfig) -> tuple[str, ...]:
     """Describe exactly which format checks this configuration enables."""
     rules = [
-        "Claude Plugin manifest validity and declared Skill discovery",
-        "Unique Skill names and non-conflicting declared Skill paths",
-        "SKILL.md presence, YAML frontmatter, and required fields",
-        "Local file references within the selected Skill directories",
-        "Configured temporary or forbidden files",
+        "Claude Plugin 清单有效性和已声明 Skill 的识别",
+        "Skill 名称唯一性与声明路径冲突",
+        "SKILL.md、YAML frontmatter 和必填字段",
+        "所选 Skill 目录内的本地文件引用",
+        "配置中禁止发布的临时文件",
     ]
     if config.require_marketplace_metadata:
-        rules.append("Wenqu release metadata consistency")
+        rules.append("Wenqu 发布元数据一致性")
     if config.require_openclaw_metadata:
-        rules.append("OpenClaw homepage metadata")
+        rules.append("OpenClaw 主页元数据")
     if config.require_image_references:
-        rules.append("Wenqu image asset references")
+        rules.append("Wenqu 图片资源引用")
     return tuple(rules)
 
 
