@@ -122,15 +122,16 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
-      - uses: gogoingai/skills-eval@v0.1.6
+      - uses: gogoingai/skills-eval@v0.1.7
         with:
           path: .
 ```
 
 `pull_request` runs when a PR opens and on every later push to its branch, so
 maintainers see an up-to-date **Skills Eval 审查结果** comment as well as the
-result in the PR's **Checks** tab. The comment includes a link to download the
-full report; the same artifact is also available from the run in the
+result in the PR's **Checks** tab. The comment identifies the checked commit,
+completion time, and workflow run, and includes a link to download the full
+report; the same artifact is also available from the run in the
 repository's **Actions** page. The comment step uses the automatic
 `GITHUB_TOKEN`; no secret needs to be configured. On a PR from an external fork
 GitHub can deny comment write access; the audit and artifact still complete

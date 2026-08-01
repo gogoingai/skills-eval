@@ -17,7 +17,7 @@ inputs:
   version:
     description: PyPI requirement used to run Skills Eval.
     required: false
-    default: skills-eval>=0.1.6,<0.2
+    default: skills-eval>=0.1.7,<0.2
   comment:
     description: Update one summary comment when the workflow runs for a pull request.
     required: false
@@ -91,6 +91,10 @@ runs:
 
           const { owner, repo } = context.repo;
           const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+          const headSha = context.payload.pull_request.head.sha;
+          const shortSha = headSha.slice(0, 7);
+          const headUrl = `${context.serverUrl}/${owner}/${repo}/commit/${headSha}`;
+          const checkedAt = Math.floor(Date.now() / 1000);
           const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
             owner,
             repo,
@@ -107,7 +111,21 @@ runs:
           const displayedReport = report.length > maxReportLength
             ? `${report.slice(0, maxReportLength)}\n\n_报告过长，完整内容请下载附件。_`
             : report;
-          const body = `${marker}\n## Skills Eval 审查结果\n\n${displayedReport}\n\n---\n[下载完整报告](${artifactUrl}) · [查看本次运行](${runUrl})`;
+          const body = [
+            marker,
+            "> 🤖 **Powered by [Skills Eval](https://github.com/gogoingai/skills-eval)** — an open-source pre-release reviewer for multi-Skill Claude Plugins.",
+            "",
+            "## Skills Eval 审查结果",
+            "",
+            `> 最新提交：[\`${shortSha}\`](${headUrl})`,
+            `> 审查完成：<t:${checkedAt}:F> · [查看本次运行](${runUrl})`,
+            "> _This comment updates in place after each new commit to this pull request._",
+            "",
+            displayedReport,
+            "",
+            "---",
+            `[下载完整报告](${artifactUrl})`,
+          ].join("\n");
           const comments = await github.paginate(github.rest.issues.listComments, {
             owner,
             repo,
