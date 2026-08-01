@@ -96,3 +96,33 @@ the report in Chinese; every other preference renders it in English.
 Tagged releases (`v*`) build the package and publish with PyPI Trusted
 Publishing through GitHub Actions OIDC. The publish job uses the `pypi`
 environment and `id-token: write`; it does not use a `PYPI_TOKEN`.
+
+## GitHub Action
+
+The repository also provides a reusable GitHub Action. It installs the selected
+published CLI version, runs the check, and uploads `skills-eval-report.md` as an
+artifact even when the check fails.
+
+```yaml
+name: Skills review
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gogoingai/skills-eval@v0.1.5
+        with:
+          path: .
+```
+
+`pull_request` runs when a PR opens and on every later push to its branch, so
+maintainers see the result in the PR's **Checks** tab. The same run appears in
+the repository's **Actions** page, where the report artifact can be downloaded.
+The caller controls triggers; this Action never publishes a package, creates a
+tag, or changes repository files.
