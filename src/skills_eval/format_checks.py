@@ -35,7 +35,7 @@ def check_format(root: Path, plugin: Plugin, skills: list[Skill], config: EvalCo
     _check_root_files(root, config, diagnostics)
     _check_forbidden_paths(root, config, diagnostics)
     _check_skill_frontmatter(skills, config, diagnostics)
-    _check_local_references(root, config, diagnostics)
+    _check_local_references(root, skills, config, diagnostics)
 
     if config.require_marketplace_metadata:
         _check_wenqu_release_metadata(root, diagnostics)
@@ -93,9 +93,12 @@ def _is_nonempty_scalar(value: object) -> bool:
     return not isinstance(value, str) or bool(value.strip())
 
 
-def _check_local_references(root: Path, config: EvalConfig, diagnostics: list[Diagnostic]) -> None:
+def _check_local_references(
+    root: Path, skills: list[Skill], config: EvalConfig, diagnostics: list[Diagnostic]
+) -> None:
     extensions = {extension.lower() for extension in config.reference_extensions}
-    for source in _walk_files(root):
+    sources = (source for skill in skills for source in _walk_files(skill.path))
+    for source in sources:
         if source.suffix.lower() not in extensions:
             continue
         try:

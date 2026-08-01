@@ -12,6 +12,10 @@ _MARKDOWN_LINK = re.compile(
     r"(?:\s+(?P<title>\"[^\"]*\"|'[^']*'))?\s*\)"
 )
 _QUOTED_PATH = re.compile(r"(?P<quote>['\"])(?P<target>[^'\"\s\r\n]+)(?P=quote)")
+_FILE_SUFFIXES = frozenset({
+    ".md", ".sh", ".py", ".js", ".ts", ".json", ".yaml", ".yml",
+    ".txt", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg",
+})
 
 
 def extract_local_references(text: str, source: Path, root: Path) -> list[Path]:
@@ -49,6 +53,12 @@ def _append_target(
     if target is None:
         return
     candidate = (source.parent / target).resolve()
+    if not candidate.exists():
+        skill_root = next((parent for parent in source.parents if (parent / "SKILL.md").is_file()), None)
+        if skill_root is not None:
+            skill_relative = (skill_root / target).resolve()
+            if skill_relative.exists():
+                candidate = skill_relative
     if candidate not in seen:
         seen.add(candidate)
         targets.append(candidate)
@@ -58,7 +68,7 @@ def _clean_target(raw_target: str, *, quoted: bool) -> str | None:
     target = raw_target.strip()
     if target.startswith("<") and target.endswith(">"):
         target = target[1:-1].strip()
-    if not target or target.startswith("#") or "$" in target:
+    if not target or target.startswith("#") or "$" in target or "..." in target or any(char in target for char in "{}"):
         return None
 
     parsed = urlsplit(target)
@@ -73,6 +83,6 @@ def _clean_target(raw_target: str, *, quoted: bool) -> str | None:
 def _looks_like_path(target: str, *, quoted: bool) -> bool:
     """Keep quoted-path extraction conservative to avoid prose false positives."""
     if quoted:
-        return target.startswith(("./", "../")) or Path(target).suffix != ""
+        return target.startswith(("./", "../")) or Path(target).suffix.lower() in _FILE_SUFFIXES
     path = Path(target)
-    return "/" in target or path.suffix != ""
+    return "/" in target or path.suffix.lower() in _FILE_SUFFIXES
