@@ -7,6 +7,7 @@ from pathlib import Path
 
 import typer
 
+from skills_eval.publish import run_publish
 from skills_eval.reporting import render_terminal, write_markdown_report
 from skills_eval.service import run_check
 
@@ -63,3 +64,52 @@ def check(
         write_markdown_report(result, report_path)
         typer.echo(f"Report: {report_path}")
     raise typer.Exit(code=result.exit_code)
+
+
+@app.command()
+def publish(
+    path: Path = typer.Argument(..., exists=True, file_okay=False, readable=True),
+    target: list[str] | None = typer.Option(
+        None,
+        "--target",
+        help="Publish only to this enabled target (clawhub, skillhub); repeatable. Defaults to every enabled publishable target.",
+    ),
+    skill: list[str] | None = typer.Option(
+        None, "--skill", help="Publish only this Skill by directory or name; repeatable."
+    ),
+    changelog: str = typer.Option(
+        "发布", "--changelog", help="Changelog entry sent to the publishing platforms."
+    ),
+    skills_only: bool = typer.Option(
+        False, "--skills-only", help="Publish Skills only, skip the plugin package."
+    ),
+    plugin_only: bool = typer.Option(
+        False, "--plugin-only", help="Publish the plugin package only, skip Skills."
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Print the planned publish commands without logging in, checking, or publishing.",
+    ),
+    skip_check: bool = typer.Option(
+        False, "--skip-check", help="Skip the defensive skills-eval check gate before publishing."
+    ),
+) -> None:
+    """Publish Skills and the plugin package to enabled platforms.
+
+    Credentials come from CLAWHUB_TOKEN / SKILLHUB_TOKEN in the environment or
+    a pre-existing CLI login; tokens are never printed.
+    """
+    if skills_only and plugin_only:
+        raise typer.BadParameter("--skills-only and --plugin-only cannot be combined.")
+    summary = run_publish(
+        path,
+        selectors=tuple(skill or ()),
+        targets=tuple(target or ()),
+        changelog=changelog,
+        dry_run=dry_run,
+        skills_only=skills_only,
+        plugin_only=plugin_only,
+        skip_check=skip_check,
+    )
+    raise typer.Exit(code=summary.exit_code)

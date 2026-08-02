@@ -1,0 +1,117 @@
+name: Skills Eval Publish
+description: Publish a Claude Plugin repository's Skills and plugin package to enabled platforms (ClawHub, SkillHub) after a defensive Skills Eval check.
+
+inputs:
+  path:
+    description: Plugin repository directory to publish.
+    required: false
+    default: .
+  targets:
+    description: Comma-separated publishing targets (clawhub,skillhub). Empty publishes to every enabled publishable target.
+    required: false
+    default: ""
+  skills:
+    description: Comma-separated Skill names to publish. Empty publishes every declared Skill.
+    required: false
+    default: ""
+  changelog:
+    description: Changelog entry sent to the publishing platforms.
+    required: false
+    default: 发布
+  dry-run:
+    description: Set to true to print the planned publish commands without logging in or publishing.
+    required: false
+    default: "false"
+  skip-check:
+    description: Set to true to skip the defensive Skills Eval check gate.
+    required: false
+    default: "false"
+  version:
+    description: PyPI requirement used to run Skills Eval.
+    required: false
+    default: skills-eval>=0.2.0,<0.3
+  clawhub-token:
+    description: ClawHub API token (clh_...). Pass a repository secret; it is only exposed as an environment variable.
+    required: false
+    default: ""
+  skillhub-token:
+    description: SkillHub API key (skh_...). Pass a repository secret; it is only exposed as an environment variable.
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
+    - name: Install pipx
+      shell: bash
+      run: python -m pip install --user pipx
+    - name: Set up Node for platform CLIs
+      if: ${{ inputs.dry-run != 'true' }}
+      uses: actions/setup-node@v4
+      with:
+        node-version: "22"
+    - name: Install platform CLIs
+      if: ${{ inputs.dry-run != 'true' }}
+      shell: bash
+      env:
+        INPUT_TARGETS: ${{ inputs.targets }}
+      run: |
+        set -euo pipefail
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        targets="$INPUT_TARGETS"
+        if [[ -z "$targets" ]]; then targets="clawhub,skillhub"; fi
+        IFS=',' read -r -a list <<< "$targets"
+        for target in "${list[@]}"; do
+          target="${target//[[:space:]]/}"
+          case "$target" in
+            clawhub) npm install --global clawhub ;;
+            skillhub) curl -fsSL https://skillhub.cn/install/install.sh | bash -s -- --cli-only ;;
+            "") ;;
+            *) echo "Unsupported publishing target: $target" >&2; exit 2 ;;
+          esac
+        done
+    - name: Publish with Skills Eval
+      id: publish
+      shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_TARGETS: ${{ inputs.targets }}
+        INPUT_SKILLS: ${{ inputs.skills }}
+        INPUT_CHANGELOG: ${{ inputs.changelog }}
+        INPUT_DRY_RUN: ${{ inputs.dry-run }}
+        INPUT_SKIP_CHECK: ${{ inputs.skip-check }}
+        INPUT_VERSION: ${{ inputs.version }}
+        CLAWHUB_TOKEN: ${{ inputs.clawhub-token }}
+        SKILLHUB_TOKEN: ${{ inputs.skillhub-token }}
+      run: |
+        set -euo pipefail
+        command=(python -m pipx run --spec "$INPUT_VERSION" skills-eval publish "$INPUT_PATH")
+        command+=(--changelog "$INPUT_CHANGELOG")
+        if [[ -n "$INPUT_TARGETS" ]]; then
+          IFS=',' read -r -a targets <<< "$INPUT_TARGETS"
+          for target in "${targets[@]}"; do
+            target="${target//[[:space:]]/}"
+            [[ -n "$target" ]] && command+=(--target "$target")
+          done
+        fi
+        if [[ -n "$INPUT_SKILLS" ]]; then
+          IFS=',' read -r -a skills <<< "$INPUT_SKILLS"
+          for skill in "${skills[@]}"; do
+            skill="${skill//[[:space:]]/}"
+            [[ -n "$skill" ]] && command+=(--skill "$skill")
+          done
+        fi
+        [[ "$INPUT_DRY_RUN" == "true" ]] && command+=(--dry-run)
+        [[ "$INPUT_SKIP_CHECK" == "true" ]] && command+=(--skip-check)
+        "${command[@]}" 2>&1 | tee "$RUNNER_TEMP/skills-eval-publish.log"
+    - name: Upload publish log
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: skills-eval-publish-log
+        path: ${{ runner.temp }}/skills-eval-publish.log
+        if-no-files-found: warn
