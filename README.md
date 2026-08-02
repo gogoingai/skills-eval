@@ -207,7 +207,7 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
-      - uses: gogoingai/skills-eval@v0.2.0
+      - uses: gogoingai/skills-eval@v0.2.1
         with:
           path: .
 ```
@@ -224,21 +224,34 @@ because commenting is non-fatal. Set `comment: false` to disable PR comments.
 The caller controls triggers; this Action never publishes a package, creates a
 tag, or changes repository files.
 
-For a PR, set `external-targets` to the local validators. The Action installs
+For a PR, set `external-targets` to the validators to run. The Action installs
 the corresponding CLIs on the runner, then records exactly these commands in
-the report. This does not need a marketplace credential:
+the report. `claude-plugin`, `workbuddy`, and `clawhub` are local validations
+that need no credential:
 
 ```yaml
-      - uses: gogoingai/skills-eval@v0.2.0
+      - uses: gogoingai/skills-eval@v0.2.1
         with:
           path: .
           external-targets: claude-plugin,workbuddy,clawhub
 ```
 
-Keep SkillHub `--dry-run` in a protected, release-only workflow with its
-platform credential. To run every enabled native validator, use `external: true`;
-that mode assumes the required tools and credentials are already available on
-the runner.
+`skillhub` is a remote `--dry-run` and needs a login. Add it to
+`external-targets` and pass `skillhub-token` (a repository secret); the Action
+installs the SkillHub CLI, logs in with the token, and retries 429 responses
+automatically. The token is exposed only as an environment variable:
+
+```yaml
+      - uses: gogoingai/skills-eval@v0.2.1
+        with:
+          path: .
+          external-targets: claude-plugin,workbuddy,clawhub,skillhub
+          skillhub-token: ${{ secrets.SKILLHUB_TOKEN }}
+```
+
+To run every enabled native validator without per-target selection, use
+`external: true`; that mode assumes the required tools and credentials are
+already available on the runner.
 
 ## GitHub Action: publish
 
@@ -262,7 +275,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: gogoingai/skills-eval/publish@v0.2.0
+      - uses: gogoingai/skills-eval/publish@v0.2.1
         with:
           targets: clawhub,skillhub
           changelog: ${{ github.ref_name }}

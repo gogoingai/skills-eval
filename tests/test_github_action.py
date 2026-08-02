@@ -29,6 +29,14 @@ def test_action_installs_requested_cli_and_uploads_report() -> None:
     assert "@anthropic-ai/claude-code" in install_step["run"]
     assert "@tencent-ai/codebuddy-code" in install_step["run"]
     assert "npm install --global clawhub" in install_step["run"]
+    assert "skillhub.cn/install/install.sh" in install_step["run"]
+    assert action["inputs"]["skillhub-token"]["default"] == ""
+    login_step = next(
+        step for step in action["runs"]["steps"] if step.get("name") == "Log in to SkillHub"
+    )
+    assert "skillhub login --key" in login_step["run"]
+    assert login_step["env"]["SKILLHUB_TOKEN"] == "${{ inputs.skillhub-token }}"
+    assert "skillhub-token" not in login_step["run"]
 
 
 def test_action_updates_one_pr_comment_after_uploading_the_report() -> None:
@@ -62,7 +70,7 @@ def test_action_updates_one_pr_comment_after_uploading_the_report() -> None:
 def test_readme_documents_reusable_github_action() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "uses: gogoingai/skills-eval@v0.2.0" in readme
+    assert "uses: gogoingai/skills-eval@v0.2.1" in readme
     assert "pull-requests: write" in readme
     assert "automatic\n`GITHUB_TOKEN`" in readme
     assert "external: true" in readme
@@ -97,7 +105,7 @@ def test_publish_action_runs_publish_with_tokens_only_in_env() -> None:
 def test_readme_documents_publish_github_action() -> None:
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "uses: gogoingai/skills-eval/publish@v0.2.0" in readme
+    assert "uses: gogoingai/skills-eval/publish@v0.2.1" in readme
     assert "secrets.CLAWHUB_TOKEN" in readme
     assert "secrets.SKILLHUB_TOKEN" in readme
     assert "skills-eval publish" in readme
