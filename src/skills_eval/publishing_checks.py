@@ -7,9 +7,11 @@ publishing command without a platform-provided dry-run flag.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +20,11 @@ from typing import ClassVar
 from skills_eval.models import PublishingCheckResult, Severity, Skill
 
 CommandRunner = Callable[[Sequence[str], Path], subprocess.CompletedProcess[str]]
+
+# Remote validators (notably SkillHub ``--dry-run``) can answer 429 / rate-limit
+# messages; retry those instead of failing the whole check on a transient limit.
+_RATE_LIMIT = re.compile(r"429|rate.?limit|频率过高|请求过于频繁|频繁|频率|reset in", re.IGNORECASE)
+_RATE_LIMIT_MAX_ATTEMPTS = 3
 
 
 def _run_command(command: Sequence[str], root: Path) -> subprocess.CompletedProcess[str]:
@@ -80,6 +87,7 @@ def run_publishing_checks(
     dry_run: bool,
     requested: bool,
     command_runner: CommandRunner = _run_command,
+    sleeper: Callable[[float], None] = time.sleep,
 ) -> tuple[PublishingCheckResult, ...]:
     """Run selected native validators, or return their plan in dry-run mode."""
     if not requested:
@@ -103,7 +111,7 @@ def run_publishing_checks(
                     )
                 )
                 continue
-            results.append(_execute(validation, root, command_runner))
+            results.append(_execute(validation, root, command_runner, sleeper))
     return tuple(results)
 
 
@@ -111,6 +119,7 @@ def _execute(
     validation: PublishingValidation,
     root: Path,
     command_runner: CommandRunner,
+    sleeper: Callable[[float], None],
 ) -> PublishingCheckResult:
     executable = validation.command[0]
     if not _executable_exists(executable):
@@ -130,8 +139,9 @@ def _execute(
                 (*validation.command, "--out", output_directory),
                 root,
                 command_runner,
+                sleeper,
             )
-    return _run_validation(validation, validation.command, root, command_runner)
+    return _run_validation(validation, validation.command, root, command_runner, sleeper)
 
 
 def _run_validation(
@@ -139,33 +149,49 @@ def _run_validation(
     command: tuple[str, ...],
     root: Path,
     command_runner: CommandRunner,
+    sleeper: Callable[[float], None],
 ) -> PublishingCheckResult:
-    try:
-        completed = command_runner(command, root)
-    except OSError as error:
+    for attempt in range(1, _RATE_LIMIT_MAX_ATTEMPTS + 1):
+        try:
+            completed = command_runner(command, root)
+        except OSError as error:
+            return PublishingCheckResult(
+                target=validation.target,
+                command=validation.displayed_command,
+                status=Severity.FAIL,
+                message=f"Could not run external validation: {error}",
+                execution_error=True,
+            )
+        if completed.returncode == 0:
+            return PublishingCheckResult(
+                target=validation.target,
+                command=validation.displayed_command,
+                status=Severity.PASS,
+            )
+        output = (completed.stderr or completed.stdout or "").strip()
+        rate_limited = bool(_RATE_LIMIT.search(output))
+        if rate_limited and attempt < _RATE_LIMIT_MAX_ATTEMPTS:
+            sleeper(60 * attempt)
+            continue
+        if rate_limited:
+            return PublishingCheckResult(
+                target=validation.target,
+                command=validation.displayed_command,
+                status=Severity.FAIL,
+                message=(
+                    f"Validation was still rate-limited after {_RATE_LIMIT_MAX_ATTEMPTS} attempts."
+                    + (f" {output}" if output else "")
+                ),
+            )
         return PublishingCheckResult(
             target=validation.target,
             command=validation.displayed_command,
             status=Severity.FAIL,
-            message=f"Could not run external validation: {error}",
-            execution_error=True,
+            message=(
+                f"Validation command exited with status {completed.returncode}."
+                + (f" {output}" if output else "")
+            ),
         )
-    if completed.returncode == 0:
-        return PublishingCheckResult(
-            target=validation.target,
-            command=validation.displayed_command,
-            status=Severity.PASS,
-        )
-    output = (completed.stderr or completed.stdout or "").strip()
-    return PublishingCheckResult(
-        target=validation.target,
-        command=validation.displayed_command,
-        status=Severity.FAIL,
-        message=(
-            f"Validation command exited with status {completed.returncode}."
-            + (f" {output}" if output else "")
-        ),
-    )
 
 
 def _executable_exists(command: str) -> bool:

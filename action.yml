@@ -22,6 +22,10 @@ inputs:
     description: Comma-separated enabled publishing targets to validate (for example, claude-plugin,workbuddy,clawhub).
     required: false
     default: ""
+  skillhub-token:
+    description: SkillHub API key (skh_...). Required only when `skillhub` is an external target; exposed solely as an environment variable.
+    required: false
+    default: ""
   version:
     description: PyPI requirement used to run Skills Eval.
     required: false
@@ -65,10 +69,25 @@ runs:
             claude-plugin) npm install --global @anthropic-ai/claude-code ;;
             workbuddy) npm install --global @tencent-ai/codebuddy-code ;;
             clawhub) npm install --global clawhub ;;
+            skillhub)
+              curl -fsSL https://skillhub.cn/install/install.sh | bash -s -- --cli-only
+              echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+              ;;
             "") ;;
             *) echo "Unsupported automatic native validator: $target" >&2; exit 2 ;;
           esac
         done
+    - name: Log in to SkillHub
+      if: ${{ inputs.external-targets != '' && inputs.skillhub-token != '' }}
+      shell: bash
+      env:
+        INPUT_EXTERNAL_TARGETS: ${{ inputs.external-targets }}
+        SKILLHUB_TOKEN: ${{ inputs.skillhub-token }}
+      run: |
+        set -euo pipefail
+        if [[ ",$INPUT_EXTERNAL_TARGETS," == *",skillhub,"* ]]; then
+          skillhub login --key "$SKILLHUB_TOKEN" --host https://api.skillhub.cn
+        fi
     - name: Run Skills Eval
       id: check
       shell: bash

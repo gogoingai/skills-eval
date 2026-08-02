@@ -146,3 +146,78 @@ def test_external_checks_are_opt_in() -> None:
     )
 
     assert results == ()
+
+
+def test_rate_limited_validation_retries_then_passes(monkeypatch) -> None:
+    monkeypatch.setattr("skills_eval.publishing_checks._executable_exists", lambda command: True)
+    attempts = {"count": 0}
+    delays: list[float] = []
+
+    def runner(command, root):
+        del root
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            return subprocess.CompletedProcess(command, 1, "", "429 Too Many Requests")
+        return subprocess.CompletedProcess(command, 0, "ok", "")
+
+    results = run_publishing_checks(
+        Path("/repo"),
+        (_skill("translate"),),
+        _targets("skillhub"),
+        dry_run=False,
+        requested=True,
+        command_runner=runner,
+        sleeper=delays.append,
+    )
+
+    assert results[0].status is Severity.PASS
+    assert attempts["count"] == 2
+    assert delays == [60]
+
+
+def test_rate_limited_validation_fails_after_exhausting_retries(monkeypatch) -> None:
+    monkeypatch.setattr("skills_eval.publishing_checks._executable_exists", lambda command: True)
+    delays: list[float] = []
+
+    def runner(command, root):
+        del root
+        return subprocess.CompletedProcess(command, 1, "", "发布频率过高，请稍后再试")
+
+    results = run_publishing_checks(
+        Path("/repo"),
+        (_skill("translate"),),
+        _targets("skillhub"),
+        dry_run=False,
+        requested=True,
+        command_runner=runner,
+        sleeper=delays.append,
+    )
+
+    assert results[0].status is Severity.FAIL
+    assert "rate-limited" in str(results[0].message)
+    assert delays == [60, 120]
+
+
+def test_non_rate_limit_failure_does_not_retry(monkeypatch) -> None:
+    monkeypatch.setattr("skills_eval.publishing_checks._executable_exists", lambda command: True)
+    calls = {"count": 0}
+    delays: list[float] = []
+
+    def runner(command, root):
+        del root
+        calls["count"] += 1
+        return subprocess.CompletedProcess(command, 1, "", "slug already exists")
+
+    results = run_publishing_checks(
+        Path("/repo"),
+        (_skill("translate"),),
+        _targets("skillhub"),
+        dry_run=False,
+        requested=True,
+        command_runner=runner,
+        sleeper=delays.append,
+    )
+
+    assert results[0].status is Severity.FAIL
+    assert calls["count"] == 1
+    assert delays == []
