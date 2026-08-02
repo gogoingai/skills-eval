@@ -132,12 +132,49 @@ targets; a selected target is shown in the terminal and Markdown report.
 Missing tools, login failures, and network errors are reported as an **external
 publishing validation** environment failure, never as a Skill security finding.
 Use `CODEBUDDY_BIN`, `SKILLHUB_BIN`, or `CLAWHUB_BIN` when a CLI is not on
-`PATH`. The SkillHub command always includes `--dry-run`; Skills Eval never
-invokes a publish command without that platform-provided safety flag.
+`PATH`. The SkillHub command always includes `--dry-run`; `skills-eval check`
+never invokes a publish command without that platform-provided safety flag.
 
 `report.language` accepts `auto` (the default), `zh`, or `en`. In `auto` mode,
 Skills Eval reads the computer's preferred language: Chinese preferences render
 the report in Chinese; every other preference renders it in English.
+
+## Publishing
+
+`skills-eval publish` is the explicit opt-in counterpart of `check`: it pushes
+the declared Skills and the plugin package to the enabled publishing platforms
+(currently `clawhub` and `skillhub`). Every run verifies the platform login,
+re-runs the full `skills-eval check` (including native validations for the
+selected targets) as a defensive gate, then publishes with rate-limit retries
+and a final summary.
+
+```bash
+# Preview the exact publish commands without logging in or publishing.
+skills-eval publish . --dry-run
+
+# Publish every Skill and the plugin package to all enabled targets.
+skills-eval publish . --changelog "0.2.0 修复画图"
+
+# Publish one Skill to one platform.
+skills-eval publish . --target clawhub --skill wenqu-write --changelog "修复画图"
+
+# Publish only the plugin package (clawhub), or only Skills.
+skills-eval publish . --plugin-only
+skills-eval publish . --skills-only
+```
+
+Credentials come from the environment—`CLAWHUB_TOKEN` or `SKILLHUB_TOKEN`—or
+from a pre-existing `clawhub login` / `skillhub login` session; tokens are
+never printed or embedded in reported commands. Platform identities live in the
+target `options` of `.skills-eval.json`: `clawhub.owner` and
+`clawhub.packageName` are required for ClawHub publishing, `clawhub.sourceRepo`
+pins the provenance repository (otherwise derived from the `origin` remote),
+and `skillhub.host` overrides the default API host. Provenance commits and refs
+come from `GITHUB_SHA` / `GITHUB_REF_NAME` when present.
+
+Exit codes: `0` everything published; `1` a publish item or the defensive check
+gate failed; `2` a prerequisite (CLI missing, not logged in, unknown or
+disabled target) is unmet. `--skip-check` bypasses the gate for emergencies.
 
 ## Release automation
 
@@ -170,7 +207,7 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@v4
-      - uses: gogoingai/skills-eval@v0.1.13
+      - uses: gogoingai/skills-eval@v0.2.0
         with:
           path: .
 ```
@@ -192,7 +229,7 @@ the corresponding CLIs on the runner, then records exactly these commands in
 the report. This does not need a marketplace credential:
 
 ```yaml
-      - uses: gogoingai/skills-eval@v0.1.13
+      - uses: gogoingai/skills-eval@v0.2.0
         with:
           path: .
           external-targets: claude-plugin,workbuddy,clawhub
@@ -202,3 +239,41 @@ Keep SkillHub `--dry-run` in a protected, release-only workflow with its
 platform credential. To run every enabled native validator, use `external: true`;
 that mode assumes the required tools and credentials are already available on
 the runner.
+
+## GitHub Action: publish
+
+A separate composite Action at `gogoingai/skills-eval/publish` runs
+`skills-eval publish`—the check Action above keeps its "never publishes"
+guarantee. A typical tag-triggered release workflow:
+
+```yaml
+name: Publish
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: release
+    concurrency: publish
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gogoingai/skills-eval/publish@v0.2.0
+        with:
+          targets: clawhub,skillhub
+          changelog: ${{ github.ref_name }}
+          clawhub-token: ${{ secrets.CLAWHUB_TOKEN }}
+          skillhub-token: ${{ secrets.SKILLHUB_TOKEN }}
+```
+
+The Action installs the platform CLIs (Node 22 for `clawhub`, the official
+installer for `skillhub`), passes tokens only as environment variables, and
+uploads the publish log as an artifact. Set `dry-run: "true"` (for example from
+a `workflow_dispatch` input) to preview the planned commands without
+publishing. Use a GitHub environment with required reviewers on `release` when
+a human approval gate is desired; without reviewers the tag push publishes
+directly.
