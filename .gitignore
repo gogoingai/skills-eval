@@ -7,3 +7,4 @@ dist/
 *.egg-info/
 uv.lock
 docs/
+logs/

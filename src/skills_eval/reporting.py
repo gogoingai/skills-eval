@@ -23,6 +23,22 @@ from skills_eval.security import SecurityFinding
 _CISCO_DISCLAIMER = (
     "Cisco AI Skill Scanner 只能提供辅助判断，不能保证某个 Skill 绝对安全。"
 )
+_SCANNER_DISCLAIMER_EN = (
+    "Security scanners are best-effort signals for review, not a guarantee that a "
+    "Skill is safe. Optional networked providers may send Skill content or dependency "
+    "manifests to third-party services; enable them only when that is acceptable."
+)
+_SCANNER_DISCLAIMER_ZH = (
+    "安全扫描器仅为辅助判断的信号，不能保证某个 Skill 绝对安全。可选的联网扫描器"
+    "可能会把 Skill 内容或依赖清单发送到第三方服务，仅在可接受时启用。"
+)
+_PROVIDER_DISPLAY = {
+    "cisco": "Cisco",
+    "skillspector": "NVIDIA",
+    "tencent-aig": "Tencent AIG",
+    "snyk": "Snyk",
+    "socket": "Socket",
+}
 
 
 def render_terminal(result: CheckResult) -> str:
@@ -48,6 +64,7 @@ def render_terminal(result: CheckResult) -> str:
         lines.extend(("Repository diagnostics:",))
         lines.extend(_terminal_diagnostic_line(diagnostic) for diagnostic in result.diagnostics)
     _append_terminal_publishing_checks(lines, result)
+    _append_terminal_security_summary(lines, result)
     lines.append(f"Result: {result.status.value}")
     if result.dry_run:
         scanners = ", ".join(result.planned_security_sources) or "none"
@@ -159,15 +176,8 @@ def _render_markdown_zh(result: CheckResult, path: Path) -> str:
                 )
             )
 
-    lines.extend(("## 已启用的安全扫描器", ""))
-    sources = tuple(source for source in result.security_sources if _is_enabled(source))
-    if not sources:
-        lines.append("没有启用安全扫描器。")
-    else:
-        for source in sources:
-            name = source.get("name", "unknown")
-            options = source.get("options", {})
-            lines.append(f"- {_markdown(name)}: {_markdown(_json(options))}")
+    lines.extend(("## 安全汇总", ""))
+    _append_security_summary_markdown(lines, result, "zh")
     lines.append("")
 
     lines.extend(("## 汇总", "", f"整体结果：{result.status.value}", ""))
@@ -183,7 +193,7 @@ def _render_markdown_zh(result: CheckResult, path: Path) -> str:
     _append_grouped_diagnostics(lines, format_diagnostics, "zh")
     lines.extend(("", "## 安全问题", ""))
     _append_security_details(lines, result, security_diagnostics, "zh")
-    lines.extend(("", "## Cisco 扫描器说明", "", _CISCO_DISCLAIMER, ""))
+    lines.extend(("", "## 扫描器说明", "", _SCANNER_DISCLAIMER_ZH, ""))
     return "\n".join(lines)
 
 
@@ -236,15 +246,8 @@ def _render_markdown_en(result: CheckResult, path: Path) -> str:
                 )
             )
 
-    lines.extend(("## Enabled security scanners", ""))
-    sources = tuple(source for source in result.security_sources if _is_enabled(source))
-    if not sources:
-        lines.append("No security scanners are enabled.")
-    else:
-        for source in sources:
-            name = source.get("name", "unknown")
-            options = source.get("options", {})
-            lines.append(f"- {_markdown(name)}: {_markdown(_json(options))}")
+    lines.extend(("## Security summary", ""))
+    _append_security_summary_markdown(lines, result, "en")
     lines.append("")
 
     format_diagnostics, security_diagnostics = _group_diagnostics(result)
@@ -255,9 +258,9 @@ def _render_markdown_en(result: CheckResult, path: Path) -> str:
     lines.extend(
         (
             "",
-            "## Cisco scanner disclaimer",
+            "## Scanner disclaimer",
             "",
-            "Cisco AI Skill Scanner is a best-effort tool and does not guarantee that a Skill is safe.",
+            _SCANNER_DISCLAIMER_EN,
             "",
         )
     )
@@ -619,3 +622,169 @@ def _terminal_text(value: object) -> str:
         for character in str(value)
         if ord(character) >= 32
     )
+
+
+def _provider_display(name: object) -> str:
+    return _PROVIDER_DISPLAY.get(str(name), str(name))
+
+
+def _append_terminal_security_summary(lines: list[str], result: CheckResult) -> None:
+    """Append a compact per-provider security summary to the terminal output."""
+    if result.dry_run or not result.security_summary:
+        return
+    lines.append("Security summary:")
+    lines.append("")
+    for provider in result.security_summary:
+        display = _provider_display(provider.provider)
+        note = provider.error or provider.skip_reason
+        counts = f"findings={provider.finding_count}"
+        if provider.suppressed_count:
+            counts += f" suppressed={provider.suppressed_count}"
+        suffix = f"  ({note})" if note else ""
+        lines.append(f"  {display:<16} {provider.status.value:<8} {counts}{suffix}")
+    if result.security_overall is not None:
+        lines.append(f"  {'Overall':<16} {result.security_overall.value}")
+    lines.append("")
+
+
+def _append_security_summary_markdown(
+    lines: list[str], result: CheckResult, language: str
+) -> None:
+    """Append a per-provider security summary table to the Markdown report."""
+    if result.dry_run:
+        lines.append(
+            "Not run (dry run)." if language == "en" else "未执行（预览）。"
+        )
+        return
+    if not result.security_summary:
+        lines.append(
+            "No security providers were run." if language == "en" else "没有运行安全扫描器。"
+        )
+        return
+
+    if language == "en":
+        lines.append(
+            "| Provider | Enabled | Available | Version | Duration | Status | Findings | Note |"
+        )
+        lines.append("|---|---:|---:|---|---:|---|---:|---|")
+    else:
+        lines.append(
+            "| 扫描器 | 启用 | 可用 | 版本 | 耗时 | 状态 | 问题数 | 说明 |"
+        )
+        lines.append("|---|---:|---:|---|---:|---|---:|---|")
+    for provider in result.security_summary:
+        note = provider.error or provider.skip_reason or ""
+        if provider.suppressed_count:
+            tag = f"suppressed={provider.suppressed_count}"
+            note = f"{tag} {note}".strip()
+        duration = f"{provider.duration_ms}ms" if provider.duration_ms is not None else ""
+        lines.append(
+            f"| {_markdown(_provider_display(provider.provider))} "
+            f"| {'yes' if provider.enabled else 'no'} "
+            f"| {'yes' if provider.available else 'no'} "
+            f"| {_markdown(provider.version or '')} "
+            f"| {duration} "
+            f"| {provider.status.value} "
+            f"| {provider.finding_count} "
+            f"| {_markdown(note)} |"
+        )
+    if result.security_overall is not None:
+        label = "Overall" if language == "en" else "整体"
+        lines.append("")
+        lines.append(f"**{label}**: {result.security_overall.value}")
+
+
+def render_json(result: CheckResult) -> str:
+    """Render a machine-readable JSON report for CI and platform integration."""
+    return json.dumps(_json_report(result), ensure_ascii=False, indent=2, default=str)
+
+
+def _json_report(result: CheckResult) -> object:
+    return {
+        "schemaVersion": 1,
+        "plugin": result.plugin_name,
+        "root": str(result.root_path) if result.root_path else None,
+        "selector": result.selector,
+        "dryRun": result.dry_run,
+        "overall": {
+            "status": result.status.value,
+            "exitCode": result.exit_code,
+        },
+        "security": {
+            "failOn": result.security_fail_on,
+            "overall": result.security_overall.value if result.security_overall else None,
+            "providers": [_provider_json(provider) for provider in result.security_summary],
+            "configuredSources": [_json_value(source) for source in result.security_sources],
+        },
+        "skills": [
+            _skill_json(skill, result) for skill in result.skills
+        ],
+        "findings": [
+            _finding_json(finding)
+            for skill_result in result.skill_results
+            for finding in skill_result.findings
+            if isinstance(finding, SecurityFinding)
+        ],
+        "diagnostics": [
+            {
+                "severity": diagnostic.severity.value,
+                "code": diagnostic.code,
+                "message": diagnostic.message,
+                "path": str(diagnostic.path) if diagnostic.path else None,
+                "executionError": diagnostic.is_execution_error,
+            }
+            for diagnostic in (*result.diagnostics, *(d for sr in result.skill_results for d in sr.diagnostics))
+        ],
+    }
+
+
+def _provider_json(provider: object) -> object:
+    return {
+        "name": provider.provider,
+        "enabled": provider.enabled,
+        "available": provider.available,
+        "required": provider.required,
+        "version": provider.version,
+        "durationMs": provider.duration_ms,
+        "status": provider.status.value,
+        "findingCount": provider.finding_count,
+        "suppressedCount": provider.suppressed_count,
+        "error": provider.error,
+        "skipReason": provider.skip_reason,
+        "findings": [_finding_json(finding) for finding in provider.findings],
+        "suppressed": [_finding_json(finding) for finding in provider.suppressed],
+    }
+
+
+def _skill_json(skill: Skill, result: CheckResult) -> object:
+    skill_result = next(
+        (sr for sr in result.skill_results if sr.skill.path == skill.path), None
+    )
+    findings = skill_result.findings if skill_result is not None else ()
+    providers = skill_result.security_results if skill_result is not None else ()
+    return {
+        "name": skill.name,
+        "path": str(skill.path),
+        "format": skill.format_status.value,
+        "security": skill.security_status.value if skill.security_status is not None else None,
+        "providers": [_provider_json(provider) for provider in providers],
+        "findings": [
+            _finding_json(finding) for finding in findings if isinstance(finding, SecurityFinding)
+        ],
+    }
+
+
+def _finding_json(finding: SecurityFinding) -> object:
+    return {
+        "provider": finding.provider,
+        "ruleId": finding.rule_id,
+        "level": finding.level.value,
+        "severity": finding.severity.value,
+        "title": finding.title,
+        "description": finding.detail,
+        "file": str(finding.path) if finding.path else None,
+        "line": finding.line,
+        "recommendation": finding.remediation,
+        "sourceSeverity": finding.source_severity,
+        "raw": _json_value(finding.raw) if finding.raw else None,
+    }

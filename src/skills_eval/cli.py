@@ -8,11 +8,19 @@ from pathlib import Path
 import typer
 
 from skills_eval.publish import run_publish
-from skills_eval.reporting import render_terminal, write_markdown_report
+from skills_eval.reporting import render_json, render_terminal, write_markdown_report
 from skills_eval.service import run_check
 
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
+
+_FORMATS = {"terminal", "markdown", "json"}
+
+
+def _validate_format(value: str) -> str:
+    if value not in _FORMATS:
+        raise typer.BadParameter(f"format must be one of {', '.join(sorted(_FORMATS))}")
+    return value
 
 
 def _version_callback(value: bool) -> None:
@@ -49,6 +57,17 @@ def check(
         "--external-target",
         help="Run native validation only for this enabled publishing target; repeatable.",
     ),
+    report_format: str = typer.Option(
+        "terminal",
+        "--format",
+        help="Report format: terminal (default), markdown, or json.",
+        callback=_validate_format,
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        help="Write the report to this path (format inferred from --format or .json suffix).",
+    ),
 ) -> None:
     """Check a Claude Plugin repository before release."""
     result = run_check(
@@ -58,11 +77,23 @@ def check(
         external=external or bool(external_target),
         external_targets=tuple(external_target or ()),
     )
-    typer.echo(render_terminal(result))
-    if not dry_run:
-        report_path = path.resolve() / "skills-eval-report.md"
-        write_markdown_report(result, report_path)
-        typer.echo(f"Report: {report_path}")
+    fmt = report_format
+    if fmt == "terminal" and output is not None and output.suffix.lower() == ".json":
+        fmt = "json"
+
+    if fmt == "json":
+        payload = render_json(result)
+        if output is not None and not dry_run:
+            output.write_text(payload + "\n", encoding="utf-8")
+            typer.echo(f"Report: {output}")
+        else:
+            typer.echo(payload)
+    else:
+        typer.echo(render_terminal(result))
+        if not dry_run:
+            report_path = output if output is not None else path.resolve() / "skills-eval-report.md"
+            write_markdown_report(result, report_path)
+            typer.echo(f"Report: {report_path}")
     raise typer.Exit(code=result.exit_code)
 
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "skills-eval"
-version = "0.2.1"
+version = "0.3.0"
 description = "Evaluate Claude skills plugins"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -16,6 +16,12 @@ dependencies = [
     "pathspec",
     "cisco-ai-skill-scanner",
 ]
+
+[project.optional-dependencies]
+# Tencent aig-skill-scan is the only new scanner published on PyPI and is
+# compatible with skills-eval's Python 3.10+ baseline. Install it with:
+#   pip install "skills-eval[tencent-aig]"
+tencent-aig = ["aig-skill-scan"]
 
 [project.scripts]
 skills-eval = "skills_eval.cli:app"

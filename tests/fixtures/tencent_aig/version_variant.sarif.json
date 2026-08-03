@@ -1,0 +1,18 @@
+{
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {"driver": {"name": "aig-skill-scan", "version": "0.3.0", "extra": true}},
+      "results": [
+        {"ruleId": "T05", "level": "error", "message": {"text": "Future rule"}, "locations": [{"physicalLocation": {"artifactLocation": {"uri": "SKILL.md"}, "region": {"startLine": 2}}}], "extraField": "ignored-by-parser"}
+      ]
+    },
+    {
+      "tool": {"driver": {"name": "aig-skill-scan"}},
+      "results": [
+        {"ruleId": "T06", "level": "warning", "message": {"text": "Second run finding"}, "locations": [{"physicalLocation": {"artifactLocation": {"uri": "scripts/run.py"}, "region": {"startLine": 7}}}]}
+      ]
+    }
+  ],
+  "extraTopLevel": true
+}

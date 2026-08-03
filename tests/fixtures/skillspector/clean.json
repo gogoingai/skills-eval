@@ -1,0 +1,7 @@
+{
+  "skill": {"name": "safe-skill", "source": "./safe-skill", "scanned_at": "2026-08-01T00:00:00Z"},
+  "risk_assessment": {"score": 0, "severity": "LOW", "recommendation": "SAFE"},
+  "components": [{"path": "SKILL.md", "type": "markdown", "lines": 10, "executable": false, "size_bytes": 120}],
+  "issues": [],
+  "metadata": {"has_executable_scripts": false, "skillspector_version": "2.5.1", "llm_requested": false, "llm_available": false}
+}

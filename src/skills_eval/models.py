@@ -6,10 +6,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, TYPE_CHECKING
 from types import MappingProxyType
 
 import yaml
+
+if TYPE_CHECKING:
+    from skills_eval.security.base import ProviderResult, ScanStatus
 
 
 class Severity(str, Enum):
@@ -81,10 +84,12 @@ class SkillResult:
     skill: Skill
     diagnostics: tuple[Diagnostic, ...] = ()
     findings: tuple[Finding, ...] = ()
+    security_results: tuple[ProviderResult, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "diagnostics", tuple(self.diagnostics))
         object.__setattr__(self, "findings", tuple(self.findings))
+        object.__setattr__(self, "security_results", tuple(self.security_results))
 
     @property
     def severity(self) -> Severity:
@@ -123,6 +128,9 @@ class CheckResult:
     publishing_checks: tuple[PublishingCheckResult, ...] = ()
     external_checks_requested: bool = False
     requested_external_targets: tuple[str, ...] = ()
+    security_summary: tuple["ProviderResult", ...] = ()
+    security_overall: "ScanStatus | None" = None
+    security_fail_on: str = "high"
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "skills", tuple(self.skills))
@@ -143,6 +151,7 @@ class CheckResult:
             "requested_external_targets",
             tuple(self.requested_external_targets),
         )
+        object.__setattr__(self, "security_summary", tuple(self.security_summary))
 
     @property
     def severity(self) -> Severity:

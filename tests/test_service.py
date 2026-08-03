@@ -4,21 +4,44 @@ import json
 from pathlib import Path
 
 from skills_eval.models import CheckResult, CheckStatus, Severity, Skill
-from skills_eval.security import ExecutionDiagnostic, ScanOutcome, SecurityFinding
+from skills_eval.security import ExecutionDiagnostic, ScanOutcome, ScanStatus, SecurityFinding
+from skills_eval.security.base import FindingLevel
 from skills_eval.service import run_check
 
 
 class RecordingScanner:
+    name = "recording"
+
     def __init__(self, outcomes: dict[str, ScanOutcome] | None = None) -> None:
         self.outcomes = outcomes or {}
         self.calls: list[tuple[Path, dict[str, object]]] = []
 
+    def is_available(self) -> bool:
+        return True
+
+    def get_version(self) -> str | None:
+        return None
+
+    def normalize_result(self, raw_result: object) -> tuple:
+        return ()
+
     def scan(self, skill_path: Path, options: dict[str, object]) -> ScanOutcome:
         self.calls.append((skill_path, options))
-        return self.outcomes.get(skill_path.name, ScanOutcome(status=Severity.PASS))
+        return self.outcomes.get(skill_path.name, ScanOutcome(status=ScanStatus.PASS))
 
 
 class RaisingScanner:
+    name = "raising"
+
+    def is_available(self) -> bool:
+        return True
+
+    def get_version(self) -> str | None:
+        return None
+
+    def normalize_result(self, raw_result: object) -> tuple:
+        return ()
+
     def scan(self, skill_path: Path, options: dict[str, object]) -> ScanOutcome:
         raise RuntimeError("adapter escaped its normal error boundary")
 
@@ -42,7 +65,7 @@ def test_dry_run_discovers_checks_but_never_invokes_scanner(
         called = True
         raise AssertionError("scanner must not run")
 
-    monkeypatch.setattr("skills_eval.service.ScannerRegistry.create", fail_if_called)
+    monkeypatch.setattr("skills_eval.security.summary.ScannerRegistry.create", fail_if_called)
 
     result = run_check(root, selector=None, dry_run=True)
 
@@ -165,7 +188,7 @@ def test_selector_scans_only_the_selected_skill_with_configured_options(
     )
     scanner = RecordingScanner()
     monkeypatch.setattr(
-        "skills_eval.service.ScannerRegistry.create",
+        "skills_eval.security.summary.ScannerRegistry.create",
         lambda name: scanner,
     )
 
@@ -193,7 +216,7 @@ def test_format_failure_does_not_prevent_independent_security_scan(
     scanner = RecordingScanner(
         {
             "write": ScanOutcome(
-                status=Severity.REVIEW,
+                status=ScanStatus.WARN,
                 findings=(
                     SecurityFinding(
                         severity=Severity.REVIEW,
@@ -207,7 +230,7 @@ def test_format_failure_does_not_prevent_independent_security_scan(
         }
     )
     monkeypatch.setattr(
-        "skills_eval.service.ScannerRegistry.create",
+        "skills_eval.security.summary.ScannerRegistry.create",
         lambda name: scanner,
     )
 
@@ -233,7 +256,7 @@ def test_scanner_execution_diagnostic_is_associated_with_the_scanned_skill(
     scanner = RecordingScanner(
         {
             "write": ScanOutcome(
-                status=Severity.FAIL,
+                status=ScanStatus.ERROR,
                 diagnostic=ExecutionDiagnostic(
                     severity=Severity.FAIL,
                     code="CISCO_PROCESS_FAILED",
@@ -243,7 +266,7 @@ def test_scanner_execution_diagnostic_is_associated_with_the_scanned_skill(
         }
     )
     monkeypatch.setattr(
-        "skills_eval.service.ScannerRegistry.create",
+        "skills_eval.security.summary.ScannerRegistry.create",
         lambda name: scanner,
     )
 
@@ -264,7 +287,7 @@ def test_unexpected_scanner_exception_becomes_per_skill_execution_error(
 ) -> None:
     root = plugin_factory()
     monkeypatch.setattr(
-        "skills_eval.service.ScannerRegistry.create",
+        "skills_eval.security.summary.ScannerRegistry.create",
         lambda name: RaisingScanner(),
     )
 
@@ -288,7 +311,7 @@ def test_invalid_configuration_remains_global_while_safe_checks_continue(
     )
     scanner = RecordingScanner()
     monkeypatch.setattr(
-        "skills_eval.service.ScannerRegistry.create",
+        "skills_eval.security.summary.ScannerRegistry.create",
         lambda name: scanner,
     )
 
@@ -322,7 +345,7 @@ def test_all_enabled_scanners_run_and_fail_takes_precedence(
         "first": RecordingScanner(
             {
                 "write": ScanOutcome(
-                    status=Severity.REVIEW,
+                    status=ScanStatus.WARN,
                     findings=(
                         SecurityFinding(
                             severity=Severity.REVIEW,
@@ -330,6 +353,7 @@ def test_all_enabled_scanners_run_and_fail_takes_precedence(
                             message="Review.",
                             source="first",
                             rule_id="FIRST-1",
+                            level=FindingLevel.MEDIUM,
                         ),
                     ),
                 )
@@ -338,7 +362,7 @@ def test_all_enabled_scanners_run_and_fail_takes_precedence(
         "second": RecordingScanner(
             {
                 "write": ScanOutcome(
-                    status=Severity.FAIL,
+                    status=ScanStatus.FAIL,
                     findings=(
                         SecurityFinding(
                             severity=Severity.FAIL,
@@ -346,6 +370,7 @@ def test_all_enabled_scanners_run_and_fail_takes_precedence(
                             message="Block.",
                             source="second",
                             rule_id="SECOND-1",
+                            level=FindingLevel.HIGH,
                         ),
                     ),
                 )
@@ -375,7 +400,7 @@ def test_all_enabled_scanners_run_and_fail_takes_precedence(
         ),
     )
     monkeypatch.setattr(
-        "skills_eval.service.ScannerRegistry.create",
+        "skills_eval.security.summary.ScannerRegistry.create",
         lambda name: scanners[name],
     )
 

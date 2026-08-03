@@ -17,7 +17,8 @@ from skills_eval.models import Diagnostic, Severity
 
 _CONFIG_NAME = ".skills-eval.json"
 _SCHEMA_RESOURCE = "schemas/skills-eval.schema.json"
-_KNOWN_SOURCES = frozenset({"cisco"})
+_KNOWN_SOURCES = frozenset({"cisco", "skillspector", "tencent-aig", "snyk"})
+_KNOWN_FAIL_ON = frozenset({"info", "low", "medium", "high", "critical"})
 _KNOWN_PUBLISHING_TARGETS = frozenset(
     {"claude-plugin", "workbuddy", "skillhub", "openclaw", "clawhub"}
 )
@@ -28,6 +29,7 @@ _PORTABLE_FORMAT: dict[str, object] = {
     "referenceExtensions": [".md"],
 }
 _DEFAULT_SOURCES = [{"name": "cisco", "enabled": True}]
+_DEFAULT_FAIL_ON = "high"
 _DEFAULT_PUBLISHING_TARGETS: list[object] = []
 _DEFAULT_REPORT_LANGUAGE = "auto"
 _DEFAULT_RELEASE: dict[str, object] = {}
@@ -45,6 +47,7 @@ class EvalConfig:
     publishing_targets: tuple[Mapping[str, object], ...] = ()
     release: Mapping[str, object] = MappingProxyType({})
     report_language: str = _DEFAULT_REPORT_LANGUAGE
+    security_fail_on: str = _DEFAULT_FAIL_ON
 
 
 def load_config(root: Path) -> tuple[EvalConfig, list[Diagnostic]]:
@@ -85,6 +88,10 @@ def load_config(root: Path) -> tuple[EvalConfig, list[Diagnostic]]:
     unknown_sources = [source.get("name") for source in sources if source.get("name") not in _KNOWN_SOURCES]
     if unknown_sources:
         return _portable_with_error(config_path, f"Unknown security source: {unknown_sources[0]!r}.")
+    fail_on = security.get("failOn", _DEFAULT_FAIL_ON)
+    assert isinstance(fail_on, str)
+    if fail_on not in _KNOWN_FAIL_ON:
+        return _portable_with_error(config_path, f"Unknown security failOn threshold: {fail_on!r}.")
 
     publishing = raw_config.get("publishing", {})
     assert isinstance(publishing, dict)
@@ -112,7 +119,9 @@ def load_config(root: Path) -> tuple[EvalConfig, list[Diagnostic]]:
     report_language = report.get("language", _DEFAULT_REPORT_LANGUAGE)
     assert isinstance(report_language, str)
 
-    return _resolved_config(format_config, sources, publishing_targets, release, report_language), []
+    return _resolved_config(
+        format_config, sources, publishing_targets, release, report_language, fail_on
+    ), []
 
 
 def _validator() -> Draft202012Validator:
@@ -126,6 +135,7 @@ def _resolved_config(
     publishing_targets: list[object] | None = None,
     release: Mapping[str, object] | None = None,
     report_language: str = _DEFAULT_REPORT_LANGUAGE,
+    security_fail_on: str = _DEFAULT_FAIL_ON,
 ) -> EvalConfig:
     frozen_sources = tuple(_freeze_mapping(source) for source in sources)
     return EvalConfig(
@@ -140,6 +150,7 @@ def _resolved_config(
         ),
         release=_freeze_mapping(dict(release or _DEFAULT_RELEASE)),
         report_language=report_language,
+        security_fail_on=security_fail_on,
     )
 
 

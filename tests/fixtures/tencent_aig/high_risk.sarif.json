@@ -1,0 +1,22 @@
+{
+  "version": "2.1.0",
+  "runs": [{
+    "tool": {"driver": {"name": "aig-skill-scan", "version": "0.2.1"}},
+    "results": [
+      {
+        "ruleId": "T04",
+        "level": "error",
+        "message": {"text": "Dangerous remote script execution"},
+        "locations": [{"physicalLocation": {"artifactLocation": {"uri": "scripts/setup.sh"}, "region": {"startLine": 12, "endLine": 18}}}],
+        "partialFingerprints": {"primaryLocationLineHash": "abc123"},
+        "fixes": [{"description": {"text": "Remove the curl|sh pipeline."}}]
+      },
+      {
+        "ruleId": "T02",
+        "level": "error",
+        "message": {"text": "Prompt injection vector"},
+        "locations": [{"physicalLocation": {"artifactLocation": {"uri": "SKILL.md"}, "region": {"startLine": 4}}}]
+      }
+    ]
+  }]
+}

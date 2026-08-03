@@ -2,108 +2,80 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
-from contextlib import contextmanager
 import json
-import os
-from pathlib import Path
-import shutil
-import signal
 import subprocess
-import sys
 import tempfile
-from threading import Lock, Thread
+import time
+from importlib import metadata
+from pathlib import Path
 from typing import Any
-
-import pathspec
 
 from skills_eval.models import Severity, parse_frontmatter
 from skills_eval.security.base import (
     ExecutionDiagnostic,
+    FindingLevel,
     ScanOutcome,
+    ScanStatus,
     SecurityFinding,
+    level_to_severity,
+)
+from skills_eval.security.runner import (
+    executable_path,
+    resolve_executable,
+    run_subprocess,
+    staged_scan_input,
 )
 
-
 _POLICIES = frozenset({"balanced", "strict", "permissive"})
-_FAIL_SEVERITIES = frozenset({"critical", "high"})
-_REVIEW_SEVERITIES = frozenset({"medium", "low", "info"})
+_LEVEL_BY_SOURCE = {
+    "critical": FindingLevel.CRITICAL,
+    "high": FindingLevel.HIGH,
+    "medium": FindingLevel.MEDIUM,
+    "low": FindingLevel.LOW,
+    "info": FindingLevel.INFO,
+}
 _DETAIL_LIMIT = 2_000
 _PROCESS_OUTPUT_LIMIT = 64 * 1024
 _JSON_OUTPUT_LIMIT = 16 * 1024 * 1024
 _SCANNER_TIMEOUT_SECONDS = 300.0
-_CAPTURE_JOIN_TIMEOUT_SECONDS = 0.25
-_PROCESS_TERMINATION_TIMEOUT_SECONDS = 1.0
-_READ_CHUNK_SIZE = 8 * 1024
 _SUPPORTED_OPTIONS = frozenset({"policy", "useBehavioral"})
 
 
 def run_scanner(args: list[str]) -> tuple[int, str, str]:
     """Run the external scanner with bounded execution and captured output."""
-    process = subprocess.Popen(
+    return run_subprocess(
         args,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        **_process_group_options(),
+        timeout=_SCANNER_TIMEOUT_SECONDS,
+        stdout_limit=_PROCESS_OUTPUT_LIMIT,
+        stderr_limit=_PROCESS_OUTPUT_LIMIT,
     )
-    assert process.stdout is not None
-    assert process.stderr is not None
-
-    stdout_capture = _BoundedStreamCapture()
-    stderr_capture = _BoundedStreamCapture()
-    stdout_thread = Thread(
-        target=stdout_capture.drain,
-        args=(process.stdout,),
-        daemon=True,
-    )
-    stderr_thread = Thread(
-        target=stderr_capture.drain,
-        args=(process.stderr,),
-        daemon=True,
-    )
-    try:
-        stdout_thread.start()
-        stderr_thread.start()
-
-        timed_out = False
-        try:
-            return_code = process.wait(timeout=_SCANNER_TIMEOUT_SECONDS)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            _terminate_process_group(process)
-            return_code = _wait_for_process(process)
-
-        captures_complete = _join_capture_threads(stdout_thread, stderr_thread)
-        if not captures_complete:
-            timed_out = True
-            _terminate_process_group(process)
-            return_code = _wait_for_process(process)
-            _join_capture_threads(stdout_thread, stderr_thread)
-
-        stdout = stdout_capture.text()
-        stderr = stderr_capture.text()
-        if timed_out:
-            raise subprocess.TimeoutExpired(
-                cmd=args,
-                timeout=_SCANNER_TIMEOUT_SECONDS,
-                output=stdout,
-                stderr=stderr,
-            )
-        return return_code, stdout, stderr
-    except subprocess.TimeoutExpired:
-        raise
-    except BaseException:
-        _terminate_process_group(process)
-        _wait_for_process(process)
-        _join_capture_threads(stdout_thread, stderr_thread)
-        raise
 
 
 class CiscoScanner:
     """Normalize Cisco AI Skill Scanner JSON into shared evaluation models."""
 
+    name = "cisco"
+
     def __init__(self, executable: str = "skill-scanner") -> None:
         self.executable = executable
+        self._version: str | None = None
+
+    def is_available(self) -> bool:
+        """Return whether the Cisco scanner executable can be resolved."""
+        return executable_path(self.executable) is not None
+
+    def get_version(self) -> str | None:
+        """Return the installed Cisco scanner version, cached after the first call."""
+        if self._version is None:
+            try:
+                self._version = metadata.version("cisco-ai-skill-scanner")
+            except metadata.PackageNotFoundError:
+                self._version = ""
+        return self._version or None
+
+    def normalize_result(self, raw_result: object) -> tuple[SecurityFinding, ...]:
+        """Normalize a parsed Cisco payload into security findings."""
+        return _normalize_findings(raw_result)
 
     def scan(self, skill_path: Path, options: dict[str, object]) -> ScanOutcome:
         option_error = _validate_options(options)
@@ -113,6 +85,7 @@ class CiscoScanner:
         policy = options.get("policy", "balanced")
         assert isinstance(policy, str)
         output_path: Path | None = None
+        version = self.get_version()
 
         try:
             with tempfile.NamedTemporaryFile(
@@ -124,9 +97,9 @@ class CiscoScanner:
             ) as output:
                 output_path = Path(output.name)
 
-            with _scan_input_path(skill_path) as scan_path:
+            with staged_scan_input(skill_path) as scan_path:
                 args = [
-                    _resolve_executable(self.executable),
+                    resolve_executable(self.executable),
                     "scan",
                     str(scan_path),
                     "--format",
@@ -139,6 +112,7 @@ class CiscoScanner:
                 if options.get("useBehavioral") is True:
                     args.append("--use-behavioral")
 
+                start = time.monotonic()
                 try:
                     return_code, stdout, stderr = run_scanner(args)
                 except subprocess.TimeoutExpired as error:
@@ -159,6 +133,7 @@ class CiscoScanner:
                         "Cisco scanner could not be started.",
                         error=str(error),
                     )
+                duration_ms = int((time.monotonic() - start) * 1000)
 
             if return_code != 0:
                 return _failed(
@@ -166,6 +141,8 @@ class CiscoScanner:
                     f"Cisco scanner exited with status {return_code}.",
                     stdout=stdout,
                     stderr=stderr,
+                    duration_ms=duration_ms,
+                    version=version,
                 )
 
             try:
@@ -176,6 +153,8 @@ class CiscoScanner:
                     f"Cisco scanner JSON output exceeds the {_JSON_OUTPUT_LIMIT}-byte limit.",
                     stdout=stdout,
                     stderr=stderr,
+                    duration_ms=duration_ms,
+                    version=version,
                 )
             except (OSError, UnicodeDecodeError) as error:
                 return _failed(
@@ -184,6 +163,8 @@ class CiscoScanner:
                     stdout=stdout,
                     stderr=stderr,
                     error=str(error),
+                    duration_ms=duration_ms,
+                    version=version,
                 )
 
             # The real CLI writes to --output. Accept returned stdout as a
@@ -196,12 +177,16 @@ class CiscoScanner:
                     "Cisco scanner did not produce JSON output.",
                     stdout=stdout,
                     stderr=stderr,
+                    duration_ms=duration_ms,
+                    version=version,
                 )
             if len(output_text) > _JSON_OUTPUT_LIMIT:
                 return _failed(
                     "CISCO_OUTPUT_TOO_LARGE",
                     f"Cisco scanner JSON output exceeds the {_JSON_OUTPUT_LIMIT}-character limit.",
                     stderr=stderr,
+                    duration_ms=duration_ms,
+                    version=version,
                 )
 
             try:
@@ -213,6 +198,8 @@ class CiscoScanner:
                     output=output_text,
                     stderr=stderr,
                     error=str(error),
+                    duration_ms=duration_ms,
+                    version=version,
                 )
 
             try:
@@ -223,11 +210,19 @@ class CiscoScanner:
                     f"Cisco scanner returned an unexpected payload: {error}",
                     output=output_text,
                     stderr=stderr,
+                    duration_ms=duration_ms,
+                    version=version,
                 )
 
             findings = _filter_markdown_magic_mismatches(findings, skill_path)
             status = _outcome_status(findings)
-            return ScanOutcome(status=status, findings=findings)
+            return ScanOutcome(
+                status=status,
+                findings=findings,
+                duration_ms=duration_ms,
+                version=version,
+                raw_result=payload if isinstance(payload, dict) else None,
+            )
         except OSError as error:
             return _failed(
                 "CISCO_OUTPUT_UNREADABLE",
@@ -255,65 +250,6 @@ def _validate_options(options: dict[str, object]) -> str | None:
     return None
 
 
-def _resolve_executable(executable: str) -> str:
-    """Find a scanner installed beside the current virtual-environment Python.
-
-    pipx and uv tool environments install dependency entry points in their own
-    ``bin`` directory but do not always expose that directory to child-process
-    ``PATH`` lookups.
-    """
-    if shutil.which(executable) is not None:
-        return executable
-    bundled = Path(sys.executable).parent / executable
-    return str(bundled) if bundled.is_file() else executable
-
-
-@contextmanager
-def _scan_input_path(skill_path: Path) -> Iterator[Path]:
-    """Yield a scan directory excluding the nearest repository's ignored paths."""
-    ignore_root = _find_gitignore_root(skill_path)
-    if ignore_root is None:
-        yield skill_path
-        return
-
-    lines = (ignore_root / ".gitignore").read_text(encoding="utf-8").splitlines()
-    spec = pathspec.GitIgnoreSpec.from_lines(lines)
-    with tempfile.TemporaryDirectory(prefix="skills-eval-cisco-input-") as directory:
-        staged_path = Path(directory) / "skill"
-        shutil.copytree(
-            skill_path,
-            staged_path,
-            symlinks=True,
-            ignore=_gitignore_copy_filter(ignore_root, spec),
-        )
-        yield staged_path
-
-
-def _find_gitignore_root(path: Path) -> Path | None:
-    for candidate in (path, *path.parents):
-        if (candidate / ".gitignore").is_file():
-            return candidate
-    return None
-
-
-def _gitignore_copy_filter(
-    root: Path, spec: pathspec.GitIgnoreSpec
-) -> Callable[[str, list[str]], set[str]]:
-    def ignored_names(directory: str, names: list[str]) -> set[str]:
-        relative_directory = Path(directory).resolve().relative_to(root.resolve())
-        ignored: set[str] = set()
-        for name in names:
-            candidate = Path(directory) / name
-            relative_path = (relative_directory / name).as_posix()
-            if candidate.is_dir():
-                relative_path += "/"
-            if spec.match_file(relative_path):
-                ignored.add(name)
-        return ignored
-
-    return ignored_names
-
-
 def _normalize_findings(payload: Any) -> tuple[SecurityFinding, ...]:
     if not isinstance(payload, dict):
         raise ValueError("top-level value must be an object")
@@ -334,12 +270,10 @@ def _normalize_findings(payload: Any) -> tuple[SecurityFinding, ...]:
         if raw_severity is None:
             raise ValueError(f"finding {index} has no valid severity")
         source_severity = raw_severity.lower()
-        if source_severity in _FAIL_SEVERITIES:
-            severity = Severity.FAIL
-        elif source_severity in _REVIEW_SEVERITIES:
-            severity = Severity.REVIEW
-        else:
+        level = _LEVEL_BY_SOURCE.get(source_severity)
+        if level is None:
             raise ValueError(f"finding {index} has unsupported severity")
+        severity = level_to_severity(level)
 
         message = _optional_string(raw_finding, "message", index)
         title = _optional_string(raw_finding, "title", index)
@@ -372,6 +306,9 @@ def _normalize_findings(payload: Any) -> tuple[SecurityFinding, ...]:
                 remediation=remediation,
                 evidence=evidence,
                 source_severity=source_severity,
+                level=level,
+                title=title,
+                raw=dict(raw_finding),
             )
         )
     return tuple(findings)
@@ -425,28 +362,35 @@ def _optional_string(
     return value.strip() or None
 
 
-def _outcome_status(findings: tuple[SecurityFinding, ...]) -> Severity:
+def _outcome_status(findings: tuple[SecurityFinding, ...]) -> ScanStatus:
     if any(finding.severity is Severity.FAIL for finding in findings):
-        return Severity.FAIL
+        return ScanStatus.FAIL
     if findings:
-        return Severity.REVIEW
-    return Severity.PASS
+        return ScanStatus.WARN
+    return ScanStatus.PASS
 
 
-def _failed(code: str, message: str, **details: str) -> ScanOutcome:
+def _failed(
+    code: str,
+    message: str,
+    *,
+    duration_ms: int | None = None,
+    version: str | None = None,
+    **details: str,
+) -> ScanOutcome:
     detail = "\n".join(
-        f"{label}: {_bounded(value)}"
-        for label, value in details.items()
-        if value
+        f"{label}: {_bounded(value)}" for label, value in details.items() if value
     )
     return ScanOutcome(
-        status=Severity.FAIL,
+        status=ScanStatus.ERROR,
         diagnostic=ExecutionDiagnostic(
             severity=Severity.FAIL,
             code=code,
             message=message,
             detail=detail,
         ),
+        duration_ms=duration_ms,
+        version=version,
     )
 
 
@@ -466,86 +410,6 @@ def _read_json_output(path: Path) -> str:
     if len(contents) > _JSON_OUTPUT_LIMIT:
         raise _OutputTooLarge
     return contents.decode("utf-8")
-
-
-class _BoundedStreamCapture:
-    def __init__(self) -> None:
-        self._contents = bytearray()
-        self._truncated = False
-        self._lock = Lock()
-
-    def drain(self, stream: Any) -> None:
-        try:
-            while chunk := stream.read(_READ_CHUNK_SIZE):
-                with self._lock:
-                    remaining = _PROCESS_OUTPUT_LIMIT - len(self._contents)
-                    if remaining > 0:
-                        self._contents.extend(chunk[:remaining])
-                    if len(chunk) > max(remaining, 0):
-                        self._truncated = True
-        finally:
-            stream.close()
-
-    def text(self) -> str:
-        with self._lock:
-            contents = bytes(self._contents)
-            truncated = self._truncated
-        text = contents.decode("utf-8", errors="replace")
-        if truncated:
-            return f"{text}\n[truncated]"
-        return text
-
-
-def _process_group_options() -> dict[str, object]:
-    if os.name == "nt":
-        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
-    return {"start_new_session": True}
-
-
-def _terminate_process_group(process: subprocess.Popen[bytes]) -> None:
-    if os.name == "nt":
-        try:
-            subprocess.run(
-                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=_PROCESS_TERMINATION_TIMEOUT_SECONDS,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError):
-            pass
-    else:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            pass
-
-    if process.poll() is None:
-        try:
-            process.kill()
-        except ProcessLookupError:
-            pass
-
-
-def _wait_for_process(process: subprocess.Popen[bytes]) -> int:
-    try:
-        return process.wait(timeout=_PROCESS_TERMINATION_TIMEOUT_SECONDS)
-    except subprocess.TimeoutExpired:
-        try:
-            process.kill()
-        except ProcessLookupError:
-            pass
-        try:
-            return process.wait(timeout=_PROCESS_TERMINATION_TIMEOUT_SECONDS)
-        except subprocess.TimeoutExpired:
-            return process.returncode if process.returncode is not None else -1
-
-
-def _join_capture_threads(*threads: Thread) -> bool:
-    for thread in threads:
-        if thread.ident is not None:
-            thread.join(timeout=_CAPTURE_JOIN_TIMEOUT_SECONDS)
-    return all(thread.ident is None or not thread.is_alive() for thread in threads)
 
 
 def _output_text(value: str | bytes | None) -> str:

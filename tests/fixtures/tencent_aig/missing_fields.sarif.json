@@ -1,0 +1,11 @@
+{
+  "version": "2.1.0",
+  "runs": [{
+    "tool": {"driver": {"name": "aig-skill-scan"}},
+    "results": [
+      {"ruleId": "T01"},
+      {"level": "note"},
+      {"ruleId": "T03", "message": {"text": "No location"}, "locations": []}
+    ]
+  }]
+}

@@ -39,15 +39,78 @@ A normal run prints a compact summary and writes `skills-eval-report.md` in the
 target repository. The report records the selected Skills, each format rule,
 enabled publishing targets, security scanner configuration, and every finding.
 
+Choose an output format with `--format` (terminal, markdown, or json) and an
+explicit report path with `--output`. JSON is intended for GitHub Actions and
+platform integration:
+
+```bash
+skills-eval check .                  # terminal summary + skills-eval-report.md
+skills-eval check . --format json    # JSON report to stdout
+skills-eval check . --format json --output report.json
+skills-eval check . --format markdown --output audit.md
+```
+
 ## Checks
 
 The portable checks cover the plugin manifest, declared Skills, `SKILL.md` and
 frontmatter, local file references, duplicate names or paths, and configured
-temporary files. The bundled Cisco AI Skill Scanner reviews each selected Skill
-directory for risky commands, prompt injection, secret exposure, network
-access, and persistence-related behavior.
+temporary files. A unified multi-provider security layer then reviews each
+selected Skill directory.
 
 Scanner findings are signals for review, not a guarantee that a Skill is safe.
+
+## Security providers
+
+Security scanning is a unified Provider architecture. Each provider reports a
+status (`PASS`, `WARN`, `FAIL`, `ERROR`, `SKIPPED`) and normalized findings with
+a five-level severity (`info`, `low`, `medium`, `high`, `critical`). The overall
+result follows the worst provider: any `critical`/`high` finding is `FAIL` by
+default; only `medium` and below is `WARN`; the threshold is configurable via
+`security.failOn`. A **required** provider that cannot run makes the overall
+result `ERROR` (exit code 2); an **optional** provider error is shown but does
+not override other valid results.
+
+| Provider | Default | Local | Account | LLM | PR | Type | Data leaves host |
+|---|---:|---:|---:|---:|---:|---|---:|
+| Cisco AI Skill Scanner | enabled | yes | no | no | yes | Skill content (local) | no |
+| NVIDIA SkillSpector | enabled | yes | no (with `--no-llm`) | no (with `--no-llm`) | yes | Skill content (static) | dependency names → OSV.dev |
+| Tencent aig-skill-scan | off | yes | yes (LLM key) | yes | yes (with key) | Skill content (LLM) | Skill content → LLM endpoint |
+| Snyk | off | CLI | yes (`SNYK_TOKEN`) | no | yes (with token) | dependency / SAST | source/manifests → Snyk |
+
+- **Cisco** and **SkillSpector** are local detectors and run by default.
+- **Tencent AIG** is an open-source enhanced detector that needs an
+  OpenAI-compatible LLM endpoint (configurable base URL + model; not bound to a
+  vendor).
+- **Snyk** is an optional networked detector that scans SKILL.md instruction
+  content (prompt injection, malicious payloads, credential handling) via
+  `snyk-agent-scan` (`uvx snyk-agent-scan@latest`). Skill content is sent to
+  Snyk's verification server; enable it only when that is acceptable.
+
+### Install
+
+```bash
+pipx install skills-eval                                   # core (includes Cisco)
+pip install "skills-eval[tencent-aig]"                     # add Tencent aig-skill-scan
+uv tool install git+https://github.com/NVIDIA/skillspector.git  # NVIDIA SkillSpector (Python 3.12+)
+# Snyk Agent Scan: uvx snyk-agent-scan@latest (requires uv + SNYK_TOKEN)
+```
+
+SkillSpector is git-only and requires Python 3.12-3.14, but `uv tool install`
+gives it an isolated interpreter, so skills-eval's Python 3.10+ baseline is
+unaffected. Snyk Agent Scan runs via `uvx` (part of uv). When a provider
+is enabled but not installed, skills-eval reports `SKIPPED` (or `ERROR` if that
+provider is `required`) with the install command - it never silently fakes a
+pass.
+
+### Status meanings
+
+- `PASS` - no findings reached the warning threshold.
+- `WARN` - findings exist but none reached the blocking threshold (`failOn`).
+- `FAIL` - blocking findings exist; the Skill is not ready to publish.
+- `ERROR` - the scanner failed to run, timed out, or produced unparseable output
+  (distinct from a security finding). Required-provider errors set exit code 2.
+- `SKIPPED` - the provider is disabled, not installed, or missing optional
+  credentials.
 
 ## Configuration
 
@@ -88,15 +151,20 @@ through the GitHub-hosted schema URL:
     "language": "auto"
   },
   "security": {
+    "failOn": "high",
     "sources": [
       {
         "name": "cisco",
         "enabled": true,
+        "required": true,
         "options": {
           "policy": "balanced",
           "useBehavioral": true
         }
-      }
+      },
+      { "name": "skillspector", "enabled": true, "required": false, "options": { "useLlm": false } },
+      { "name": "tencent-aig", "enabled": false, "options": { "apiKeyEnv": "LLM_API_KEY", "baseUrlEnv": "LLM_BASE_URL", "modelEnv": "LLM_MODEL" } },
+      { "name": "snyk", "enabled": false, "options": { "tokenEnv": "SNYK_TOKEN" } },
     ]
   }
 }
@@ -112,8 +180,16 @@ does not supply one itself—for example, `claude-plugin.skillDirectoryPrefix`
 and `clawhub.packageName`. Unsupported or duplicate target names are
 configuration errors.
 
-Security sources are a configured list so future scanners can be added without
-changing the command interface.
+Security sources are a configured list so scanners can be added without
+changing the command interface. `security.failOn` sets the blocking threshold
+(`info`/`low`/`medium`/`high`/`critical`, default `high`). `required` controls
+whether a provider that cannot run fails the check (`ERROR`, exit 2) or is
+merely skipped; Cisco defaults to required, every other provider defaults to
+optional. Unrecognized provider names or options are configuration errors.
+Credentials for networked providers are read from the environment variables
+named in `options` and are never placed on the command line or written to
+reports. See [Security providers](#security-providers) for install commands and
+the data-egress implications of each provider.
 
 ## Native platform validation
 

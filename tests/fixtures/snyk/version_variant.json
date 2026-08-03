@@ -1,0 +1,20 @@
+{
+  "results": [
+    {
+      "code": "FUT-001",
+      "message": "Future finding from newer version.",
+      "extra_data": {
+        "severity": "high",
+        "title": "Future finding",
+        "description": "A finding from a newer snyk-agent-scan version.",
+        "extra_metadata": {
+          "affected_files": [
+            {"start": {"path": "SKILL.md", "line": 2}, "end": {"path": "SKILL.md", "line": 2}}
+          ]
+        },
+        "extraFutureField": "ignored"
+      }
+    }
+  ],
+  "extraTopLevel": true
+}

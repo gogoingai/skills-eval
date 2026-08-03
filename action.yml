@@ -22,6 +22,10 @@ inputs:
     description: Comma-separated enabled publishing targets to validate (for example, claude-plugin,workbuddy,clawhub).
     required: false
     default: ""
+  format:
+    description: Report format - terminal (default, writes skills-eval-report.md), markdown, or json (writes skills-eval-report.json).
+    required: false
+    default: "terminal"
   skillhub-token:
     description: SkillHub API key (skh_...). Required only when `skillhub` is an external target; exposed solely as an environment variable.
     required: false
@@ -97,6 +101,7 @@ runs:
         INPUT_DRY_RUN: ${{ inputs.dry-run }}
         INPUT_EXTERNAL: ${{ inputs.external }}
         INPUT_EXTERNAL_TARGETS: ${{ inputs.external-targets }}
+        INPUT_FORMAT: ${{ inputs.format }}
         INPUT_VERSION: ${{ inputs.version }}
       run: |
         set +e
@@ -108,7 +113,15 @@ runs:
           command+=(--dry-run)
           echo "report-path=" >> "$GITHUB_OUTPUT"
         else
-          report_path="$(cd "$INPUT_PATH" && pwd)/skills-eval-report.md"
+          if [[ "$INPUT_FORMAT" == "json" ]]; then
+            report_path="$(cd "$INPUT_PATH" && pwd)/skills-eval-report.json"
+            command+=(--format json --output "$report_path")
+          else
+            report_path="$(cd "$INPUT_PATH" && pwd)/skills-eval-report.md"
+            if [[ "$INPUT_FORMAT" == "markdown" ]]; then
+              command+=(--format markdown --output "$report_path")
+            fi
+          fi
           echo "report-path=$report_path" >> "$GITHUB_OUTPUT"
         fi
         if [[ "$INPUT_EXTERNAL" == "true" || -n "$INPUT_EXTERNAL_TARGETS" ]]; then
