@@ -1,0 +1,36 @@
+{
+  "/tmp/sp-eval": {
+    "issues": [
+      {
+        "code": "E005",
+        "message": "Suspicious download URL detected (high risk: 1.00). curl|bash from evil.example.",
+        "extra_data": {
+          "severity": "high",
+          "title": "Suspicious download URL detected",
+          "description": "This issue occurs when an AI agent is directed to download from untrusted URLs.",
+          "explanation": "Downloading and running files from unverified sources is a primary vector for malware.",
+          "evidence": "This is high-risk: it uses curl | bash to fetch and execute a .sh from an untrusted domain.",
+          "extra_metadata": {
+            "affected_files": [
+              {"start": {"path": "SKILL.md", "line": 9}, "end": {"path": "SKILL.md", "line": 9}}
+            ]
+          }
+        }
+      },
+      {
+        "code": "E006",
+        "message": "Malicious code pattern detected (high risk: 1.00).",
+        "extra_data": {
+          "severity": "high",
+          "title": "Malicious code pattern detected",
+          "description": "The skill content contains code patterns that suggest deliberate malicious behavior.",
+          "extra_metadata": {
+            "affected_files": [
+              {"start": {"path": "SKILL.md", "line": 10}, "end": {"path": "SKILL.md", "line": 10}}
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

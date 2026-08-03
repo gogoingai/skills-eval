@@ -1,0 +1,8 @@
+{
+  "issues": [
+    {"code": "X001", "message": "has code+message but no extra_data"},
+    {"severity": "low"},
+    {"title": "no severity"},
+    {"code": "X002", "extra_data": {"severity": "high", "title": "has both"}}
+  ]
+}

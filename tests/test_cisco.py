@@ -11,7 +11,7 @@ import pytest
 
 from skills_eval.models import Diagnostic, Finding, Severity
 from skills_eval.security import ScannerRegistry
-from skills_eval.security.base import ScanOutcome, SecurityScanner
+from skills_eval.security.base import ScanOutcome, ScanStatus, SecurityScanner
 from skills_eval.security.cisco import CiscoScanner, run_scanner
 
 
@@ -33,7 +33,7 @@ def test_cisco_adapter_maps_medium_finding_to_review(monkeypatch, tmp_path) -> N
 
     outcome = CiscoScanner().scan(tmp_path, {"policy": "balanced"})
 
-    assert outcome.status is Severity.REVIEW
+    assert outcome.status is ScanStatus.WARN
     assert outcome.findings[0].source == "cisco"
     assert outcome.findings[0].rule_id == "PI-001"
     assert outcome.findings[0].message == "Injected instruction"
@@ -65,7 +65,7 @@ def test_cisco_adapter_maps_high_severity_findings_to_fail(
 
     outcome = CiscoScanner().scan(tmp_path, {})
 
-    assert outcome.status is Severity.FAIL
+    assert outcome.status is ScanStatus.FAIL
     assert outcome.findings[0].severity is Severity.FAIL
     assert outcome.findings[0].path == Path("scripts/run.py")
 
@@ -92,7 +92,7 @@ def test_cisco_adapter_maps_non_blocking_findings_to_review(
 
     outcome = CiscoScanner().scan(tmp_path, {})
 
-    assert outcome.status is Severity.REVIEW
+    assert outcome.status is ScanStatus.WARN
     assert outcome.findings[0].severity is Severity.REVIEW
     assert outcome.findings[0].message == "Needs review"
 
@@ -106,7 +106,7 @@ def test_cisco_adapter_passes_when_scanner_reports_no_findings(monkeypatch, tmp_
 
     outcome = CiscoScanner().scan(tmp_path, {})
 
-    assert outcome.status is Severity.PASS
+    assert outcome.status is ScanStatus.PASS
     assert outcome.findings == ()
     assert outcome.diagnostic is None
 
@@ -133,7 +133,7 @@ def test_cisco_adapter_excludes_gitignored_files_from_scan_input(monkeypatch, tm
 
     outcome = CiscoScanner().scan(skill_path, {})
 
-    assert outcome.status is Severity.PASS
+    assert outcome.status is ScanStatus.PASS
     assert scanned_paths[0] != skill_path
 
 
@@ -163,7 +163,7 @@ def test_cisco_adapter_ignores_magic_mismatch_for_markdown_with_frontmatter(
 
     outcome = CiscoScanner().scan(tmp_path, {})
 
-    assert outcome.status is Severity.PASS
+    assert outcome.status is ScanStatus.PASS
     assert outcome.findings == ()
 
 
@@ -197,7 +197,7 @@ def test_cisco_adapter_keeps_magic_mismatch_when_other_findings_exist(monkeypatc
 
     outcome = CiscoScanner().scan(tmp_path, {})
 
-    assert outcome.status is Severity.REVIEW
+    assert outcome.status is ScanStatus.WARN
     assert [finding.code for finding in outcome.findings] == ["FILE_MAGIC_MISMATCH", "PI-001"]
 
 
@@ -222,7 +222,7 @@ def test_cisco_adapter_keeps_magic_mismatch_without_valid_frontmatter(monkeypatc
 
     outcome = CiscoScanner().scan(tmp_path, {})
 
-    assert outcome.status is Severity.REVIEW
+    assert outcome.status is ScanStatus.WARN
     assert [finding.code for finding in outcome.findings] == ["FILE_MAGIC_MISMATCH"]
 
 
@@ -249,7 +249,7 @@ def test_cisco_adapter_uses_supported_options_and_deletes_temporary_output(
         },
     )
 
-    assert outcome.status is Severity.PASS
+    assert outcome.status is ScanStatus.PASS
     assert observed_args[:5] == [
         "custom-scanner",
         "scan",
@@ -284,7 +284,7 @@ def test_cisco_adapter_uses_scanner_from_current_virtual_environment(
 
     outcome = CiscoScanner().scan(tmp_path, {})
 
-    assert outcome.status is Severity.PASS
+    assert outcome.status is ScanStatus.PASS
     assert observed_args[0] == str(scanner_executable)
 
 
@@ -314,7 +314,7 @@ def test_cisco_adapter_keeps_virtual_environment_bin_for_symlinked_python(
 
     outcome = CiscoScanner().scan(tmp_path, {})
 
-    assert outcome.status is Severity.PASS
+    assert outcome.status is ScanStatus.PASS
     assert observed_args[0] == str(scanner_executable)
 
 
@@ -330,7 +330,7 @@ def test_cisco_adapter_rejects_unknown_option_keys(monkeypatch, tmp_path) -> Non
 
     outcome = CiscoScanner().scan(tmp_path, {"unrecognized": "--dangerous"})
 
-    assert outcome.status is Severity.FAIL
+    assert outcome.status is ScanStatus.ERROR
     assert outcome.diagnostic is not None
     assert outcome.diagnostic.code == "CISCO_OPTIONS_INVALID"
     assert called is False
@@ -366,7 +366,7 @@ def test_cisco_adapter_turns_timeout_into_execution_diagnostic(
 
     outcome = CiscoScanner().scan(tmp_path, {})
 
-    assert outcome.status is Severity.FAIL
+    assert outcome.status is ScanStatus.ERROR
     assert outcome.diagnostic is not None
     assert outcome.diagnostic.code == "CISCO_PROCESS_TIMEOUT"
     assert "partial output" in outcome.diagnostic.detail
@@ -518,7 +518,7 @@ def test_cisco_adapter_rejects_oversized_json_before_loading(
 
     outcome = CiscoScanner().scan(tmp_path, {})
 
-    assert outcome.status is Severity.FAIL
+    assert outcome.status is ScanStatus.ERROR
     assert outcome.diagnostic is not None
     assert outcome.diagnostic.code == "CISCO_OUTPUT_TOO_LARGE"
 
@@ -531,7 +531,7 @@ def test_cisco_adapter_reports_process_failure_with_bounded_detail(monkeypatch, 
 
     outcome = CiscoScanner().scan(tmp_path, {})
 
-    assert outcome.status is Severity.FAIL
+    assert outcome.status is ScanStatus.ERROR
     assert outcome.findings == ()
     assert outcome.diagnostic is not None
     assert isinstance(outcome.diagnostic, Diagnostic)
@@ -548,7 +548,7 @@ def test_cisco_adapter_reports_missing_executable(monkeypatch, tmp_path) -> None
 
     outcome = CiscoScanner().scan(tmp_path, {})
 
-    assert outcome.status is Severity.FAIL
+    assert outcome.status is ScanStatus.ERROR
     assert outcome.diagnostic is not None
     assert outcome.diagnostic.code == "CISCO_EXECUTABLE_MISSING"
 
@@ -581,7 +581,7 @@ def test_cisco_adapter_rejects_malformed_or_unexpected_output(
 
     outcome = CiscoScanner().scan(tmp_path, {})
 
-    assert outcome.status is Severity.FAIL
+    assert outcome.status is ScanStatus.ERROR
     assert outcome.findings == ()
     assert outcome.diagnostic is not None
     assert outcome.diagnostic.code == code
@@ -637,7 +637,7 @@ def test_cisco_adapter_rejects_invalid_supported_options(monkeypatch, tmp_path, 
 
     outcome = CiscoScanner().scan(tmp_path, options)
 
-    assert outcome.status is Severity.FAIL
+    assert outcome.status is ScanStatus.ERROR
     assert outcome.diagnostic is not None
     assert outcome.diagnostic.code == "CISCO_OPTIONS_INVALID"
     assert called is False
@@ -652,8 +652,19 @@ def test_registry_creates_cisco_scanner() -> None:
 
 def test_registry_creates_registered_scanner_from_injected_factory() -> None:
     class CustomScanner:
+        name = "custom"
+
+        def is_available(self) -> bool:
+            return True
+
+        def get_version(self) -> str | None:
+            return None
+
         def scan(self, skill_path: Path, options: dict[str, object]) -> ScanOutcome:
-            return ScanOutcome(Severity.PASS)
+            return ScanOutcome(ScanStatus.PASS)
+
+        def normalize_result(self, raw_result: object) -> tuple:
+            return ()
 
     scanner = CustomScanner()
     ScannerRegistry.register("custom", lambda: scanner)

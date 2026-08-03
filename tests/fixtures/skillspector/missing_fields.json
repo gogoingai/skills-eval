@@ -1,0 +1,10 @@
+{
+  "skill": {"name": "sparse"},
+  "risk_assessment": {"score": 10, "recommendation": "CAUTION"},
+  "issues": [
+    {"id": "SC4"},
+    {"category": "No severity or id"},
+    {"id": "SC5", "category": "No location", "severity": "LOW"}
+  ],
+  "metadata": {"skillspector_version": "2.5.1"}
+}

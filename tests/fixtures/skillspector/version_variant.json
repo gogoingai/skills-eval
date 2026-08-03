@@ -1,0 +1,27 @@
+{
+  "skill": {"name": "future-skill", "source": "./future", "scanned_at": "2027-01-01T00:00:00Z"},
+  "risk_assessment": {"score": 60, "severity": "HIGH", "recommendation": "DO_NOT_INSTALL"},
+  "components": [],
+  "issues": [
+    {
+      "id": "SC6",
+      "finding_id": "finding-dddddddddddddddddddddddddddddddd",
+      "category": "Supply Chain",
+      "pattern": "Future Rule",
+      "severity": "HIGH",
+      "confidence": 0.9,
+      "location": {"file": "SKILL.md", "start_line": 2, "end_line": null},
+      "finding": "future-evidence",
+      "explanation": "A rule added in a future SkillSpector release.",
+      "remediation": "Future remediation text.",
+      "code_snippet": null,
+      "intent": null,
+      "tags": ["Future"],
+      "extra_future_field": "ignored-by-parser"
+    }
+  ],
+  "suppressed_count": 0,
+  "suppressed": [],
+  "metadata": {"has_executable_scripts": false, "skillspector_version": "3.0.0", "llm_requested": false, "llm_available": false, "new_meta": true},
+  "extra_top_level": true
+}

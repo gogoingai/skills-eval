@@ -1,0 +1,20 @@
+{
+  "/tmp/skill": {
+    "issues": [
+      {
+        "code": "W011",
+        "message": "Third-party content exposure detected (medium risk: 0.30).",
+        "extra_data": {
+          "severity": "medium",
+          "title": "Third-party content exposure detected",
+          "description": "An AI agent is instructed to fetch content from untrusted sources.",
+          "extra_metadata": {
+            "affected_files": [
+              {"start": {"path": "SKILL.md", "line": 1}, "end": {"path": "SKILL.md", "line": 1}}
+            ]
+          }
+        }
+      }
+    ]
+  }
+}

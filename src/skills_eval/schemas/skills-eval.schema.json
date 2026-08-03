@@ -25,6 +25,9 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "failOn": {
+          "enum": ["info", "low", "medium", "high", "critical"]
+        },
         "sources": {
           "type": "array",
           "items": { "$ref": "#/$defs/securitySource" }
@@ -72,16 +75,83 @@
       "additionalProperties": false,
       "required": ["name", "enabled"],
       "properties": {
-        "name": { "const": "cisco" },
+        "name": {
+          "enum": ["cisco", "skillspector", "tencent-aig", "snyk"]
+        },
         "enabled": { "type": "boolean" },
-        "options": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "policy": { "enum": ["balanced", "strict", "permissive"] },
-            "useBehavioral": { "type": "boolean" }
+        "required": { "type": "boolean" },
+        "options": { "type": "object" },
+        "suppress": {
+          "type": "array",
+          "description": "Known false-positive rule IDs to exclude from failOn; shown in the report as suppressed.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ruleId"],
+            "properties": {
+              "ruleId": { "type": "string", "minLength": 1 },
+              "reason": { "type": "string" }
+            }
           }
         }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "name": { "const": "cisco" } }, "required": ["name"] },
+          "then": { "properties": { "options": { "$ref": "#/$defs/ciscoOptions" } } }
+        },
+        {
+          "if": { "properties": { "name": { "const": "skillspector" } }, "required": ["name"] },
+          "then": { "properties": { "options": { "$ref": "#/$defs/skillspectorOptions" } } }
+        },
+        {
+          "if": { "properties": { "name": { "const": "tencent-aig" } }, "required": ["name"] },
+          "then": { "properties": { "options": { "$ref": "#/$defs/tencentAigOptions" } } }
+        },
+        {
+          "if": { "properties": { "name": { "const": "snyk" } }, "required": ["name"] },
+          "then": { "properties": { "options": { "$ref": "#/$defs/snykOptions" } } }
+        }
+      ]
+    },
+    "ciscoOptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "policy": { "enum": ["balanced", "strict", "permissive"] },
+        "useBehavioral": { "type": "boolean" }
+      }
+    },
+    "skillspectorOptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "useLlm": { "type": "boolean" },
+        "executable": { "type": "string", "minLength": 1 }
+      }
+    },
+    "tencentAigOptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "apiKeyEnv": { "type": "string", "minLength": 1 },
+        "baseUrlEnv": { "type": "string", "minLength": 1 },
+        "modelEnv": { "type": "string", "minLength": 1 },
+        "language": { "enum": ["zh", "en"] },
+        "executable": { "type": "string", "minLength": 1 },
+        "disableThinking": {
+          "type": "boolean",
+          "description": "Disable DeepSeek V4 thinking mode for faster scans (default true recommended)."
+        }
+      }
+    },
+    "snykOptions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tokenEnv": { "type": "string", "minLength": 1 },
+        "executable": { "type": "string", "minLength": 1 },
+        "baseUrl": { "type": "string", "minLength": 1 }
       }
     },
     "publishingTarget": {

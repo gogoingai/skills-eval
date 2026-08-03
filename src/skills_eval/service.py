@@ -17,14 +17,9 @@ from skills_eval.models import (
     Skill,
     SkillResult,
     highest_severity,
-    highest_status,
 )
 from skills_eval.publishing_checks import run_publishing_checks
-from skills_eval.security import (
-    ExecutionDiagnostic,
-    ScannerRegistry,
-    SecurityScanner,
-)
+from skills_eval.security.summary import run_security_scan
 
 
 def run_check(
@@ -83,56 +78,27 @@ def run_check(
         requested=external or bool(external_targets),
     )
 
-    scanner_entries: list[tuple[str, SecurityScanner, dict[str, object]]] = []
-    scanner_creation_failed = False
-    if not dry_run:
-        for source in enabled_sources:
-            name = _source_name(source)
-            try:
-                scanner = ScannerRegistry.create(name)
-            except Exception as error:
-                scanner_creation_failed = True
-                global_diagnostics.append(
-                    ExecutionDiagnostic(
-                        severity=Severity.FAIL,
-                        code="SCANNER_CREATE_FAILED",
-                        message=f"Security scanner {name!r} could not be created: {error}",
-                    )
-                )
-                continue
-            scanner_entries.append((name, scanner, _source_options(source)))
+    fail_on = getattr(config, "security_fail_on", "high")
+    security_report = run_security_scan(
+        selected_skills, enabled_sources, fail_on, dry_run=dry_run
+    )
+    global_diagnostics.extend(security_report.execution_diagnostics)
 
     checked_skills: list[Skill] = []
     skill_results: list[SkillResult] = []
     for skill in selected_skills:
         format_items = skill_format_diagnostics.get(skill.path, [])
-        security_status: Severity | None = None
-        security_diagnostics: list[Diagnostic] = []
-        findings: list[Finding] = []
-
-        if not dry_run:
-            security_statuses: list[Severity] = []
-            if scanner_creation_failed:
-                security_statuses.append(Severity.FAIL)
-            for name, scanner, options in scanner_entries:
-                try:
-                    outcome = scanner.scan(skill.path, options)
-                except Exception as error:
-                    security_statuses.append(Severity.FAIL)
-                    security_diagnostics.append(
-                        ExecutionDiagnostic(
-                            severity=Severity.FAIL,
-                            code="SCANNER_EXECUTION_ERROR",
-                            message=f"Security scanner {name!r} failed: {error}",
-                            path=skill.path,
-                        )
-                    )
-                    continue
-                security_statuses.append(outcome.status)
-                findings.extend(outcome.findings)
-                if outcome.diagnostic is not None:
-                    security_diagnostics.append(outcome.diagnostic)
-            security_status = highest_status(security_statuses)
+        skill_security = security_report.per_skill.get(skill.path)
+        if skill_security is None:
+            security_status: Severity | None = None
+            security_diagnostics: list[Diagnostic] = []
+            findings: list[Finding] = []
+            security_results = ()
+        else:
+            security_status = skill_security.security_status
+            security_diagnostics = list(skill_security.diagnostics)
+            findings = list(skill_security.findings)
+            security_results = skill_security.provider_results
 
         diagnostics = (*format_items, *security_diagnostics)
         checked_skill = Skill(
@@ -148,6 +114,7 @@ def run_check(
                 skill=checked_skill,
                 diagnostics=diagnostics,
                 findings=tuple(findings),
+                security_results=security_results,
             )
         )
 
@@ -167,6 +134,9 @@ def run_check(
         publishing_checks=publishing_checks,
         external_checks_requested=external or bool(external_targets),
         requested_external_targets=external_targets,
+        security_summary=security_report.provider_results,
+        security_overall=security_report.overall if not dry_run else None,
+        security_fail_on=fail_on,
     )
 
 

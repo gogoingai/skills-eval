@@ -241,3 +241,98 @@ def test_unknown_cisco_option_is_a_config_error(tmp_path) -> None:
     _, diagnostics = load_config(tmp_path)
 
     assert any(item.code == "CONFIG_INVALID" for item in diagnostics)
+
+
+def test_missing_config_defaults_fail_on_to_high(tmp_path) -> None:
+    config, diagnostics = load_config(tmp_path)
+
+    assert diagnostics == []
+    assert config.security_fail_on == "high"
+
+
+def test_fail_on_can_be_configured(tmp_path) -> None:
+    write_config(
+        tmp_path,
+        {"schemaVersion": 1, "security": {"failOn": "medium", "sources": []}},
+    )
+
+    config, diagnostics = load_config(tmp_path)
+
+    assert diagnostics == []
+    assert config.security_fail_on == "medium"
+
+
+def test_invalid_fail_on_is_a_config_error(tmp_path) -> None:
+    write_config(
+        tmp_path,
+        {"schemaVersion": 1, "security": {"failOn": "block-everything"}},
+    )
+
+    _, diagnostics = load_config(tmp_path)
+
+    assert any(item.code == "CONFIG_INVALID" for item in diagnostics)
+
+
+def test_required_flag_is_preserved_on_sources(tmp_path) -> None:
+    write_config(
+        tmp_path,
+        {
+            "schemaVersion": 1,
+            "security": {
+                "sources": [
+                    {"name": "cisco", "enabled": True, "required": False},
+                    {"name": "snyk", "enabled": True, "required": True, "options": {"tokenEnv": "SNYK_TOKEN"}},
+                ]
+            },
+        },
+    )
+
+    config, diagnostics = load_config(tmp_path)
+
+    assert diagnostics == []
+    by_name = {s["name"]: s for s in config.security_sources}
+    assert by_name["cisco"]["required"] is False
+    assert by_name["snyk"]["required"] is True
+
+
+def test_new_provider_sources_and_options_are_accepted(tmp_path) -> None:
+    write_config(
+        tmp_path,
+        {
+            "schemaVersion": 1,
+            "security": {
+                "sources": [
+                    {"name": "skillspector", "enabled": True, "options": {"useLlm": False}},
+                    {"name": "tencent-aig", "enabled": False, "options": {"apiKeyEnv": "LLM_API_KEY", "baseUrlEnv": "LLM_BASE_URL", "modelEnv": "LLM_MODEL"}},
+                    {"name": "snyk", "enabled": False, "options": {"tokenEnv": "SNYK_TOKEN"}},
+                ]
+            },
+        },
+    )
+
+    config, diagnostics = load_config(tmp_path)
+
+    assert diagnostics == []
+    assert {s["name"] for s in config.security_sources} == {
+        "skillspector",
+        "tencent-aig",
+        "snyk",
+    }
+
+
+def test_unknown_provider_option_is_a_config_error(tmp_path) -> None:
+    write_config(
+        tmp_path,
+        {
+            "schemaVersion": 1,
+            "security": {
+                "sources": [
+                    {"name": "snyk", "enabled": True, "options": {"bogus": True}}
+                ]
+            },
+        },
+    )
+
+    _, diagnostics = load_config(tmp_path)
+
+    assert any(item.code == "CONFIG_INVALID" for item in diagnostics)

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import MappingProxyType
 
@@ -248,7 +249,7 @@ def test_markdown_report_writes_to_the_requested_path_without_temp_files(
     assert list(output.parent.glob(".report.md.*.tmp")) == []
 
 
-def test_markdown_report_serializes_immutable_scanner_options(tmp_path) -> None:
+def test_markdown_report_renders_with_immutable_scanner_options(tmp_path) -> None:
     result = CheckResult(
         plugin_name="example",
         security_sources=(
@@ -265,4 +266,32 @@ def test_markdown_report_serializes_immutable_scanner_options(tmp_path) -> None:
 
     write_markdown_report(result, output)
 
-    assert '"policy": "strict"' in output.read_text(encoding="utf-8")
+    text = output.read_text(encoding="utf-8")
+    # The report must render without crashing on immutable MappingProxyType options.
+    assert "# Skills evaluation report" in text
+    assert "No security providers were run." in text
+
+
+def test_json_report_serializes_immutable_scanner_options() -> None:
+    from skills_eval.reporting import render_json
+
+    result = CheckResult(
+        plugin_name="example",
+        security_sources=(
+            MappingProxyType(
+                {
+                    "name": "cisco",
+                    "enabled": True,
+                    "options": MappingProxyType({"policy": "strict"}),
+                }
+            ),
+        ),
+    )
+
+    payload = json.loads(render_json(result))
+
+    assert payload["schemaVersion"] == 1
+    assert payload["overall"]["status"] == "READY"
+    assert payload["security"]["configuredSources"] == [
+        {"name": "cisco", "enabled": True, "options": {"policy": "strict"}}
+    ]
