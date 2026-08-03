@@ -11,7 +11,7 @@ def test_action_installs_requested_cli_and_uploads_report() -> None:
 
     assert action["runs"]["using"] == "composite"
     assert action["inputs"]["path"]["default"] == "."
-    assert action["inputs"]["version"]["default"] == "skills-eval>=0.2.0,<0.3"
+    assert action["inputs"]["version"]["default"] == "skills-eval>=0.3.0,<0.4"
     assert action["inputs"]["external"]["default"] == "false"
     assert action["inputs"]["external-targets"]["default"] == ""
     assert action["outputs"]["report-path"]
@@ -81,7 +81,7 @@ def test_publish_action_runs_publish_with_tokens_only_in_env() -> None:
     action = yaml.safe_load((ROOT / "publish" / "action.yml").read_text(encoding="utf-8"))
 
     assert action["runs"]["using"] == "composite"
-    assert action["inputs"]["version"]["default"] == "skills-eval>=0.2.0,<0.3"
+    assert action["inputs"]["version"]["default"] == "skills-eval>=0.3.0,<0.4"
     assert action["inputs"]["dry-run"]["default"] == "false"
     assert action["inputs"]["targets"]["default"] == ""
     steps = action["runs"]["steps"]

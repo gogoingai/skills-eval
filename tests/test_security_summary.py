@@ -238,6 +238,27 @@ def test_effective_status_ignores_suppressed_findings() -> None:
     assert effective_status(outcome, "high", suppressed_rule_ids=frozenset()) is ScanStatus.FAIL
 
 
+def test_per_source_fail_on_overrides_global(monkeypatch, tmp_path) -> None:
+    """A source with failOn:'critical' demotes HIGH findings to WARN."""
+    skill = _skill(tmp_path)
+    outcome = ScanOutcome(
+        status=ScanStatus.FAIL,
+        findings=(_finding(FindingLevel.HIGH, code="H"),),
+    )
+    _patch_provider(monkeypatch, "mock", MockProvider("mock", outcome=outcome))
+
+    source = {"name": "mock", "enabled": True, "failOn": "critical"}
+    report = run_security_scan([skill], (source,), "high")
+
+    # HIGH < critical -> WARN, not FAIL
+    assert report.overall is ScanStatus.WARN
+    assert report.per_skill[skill.path].security_status is Severity.REVIEW
+
+    # Same finding with global failOn:"high" would be FAIL
+    report2 = run_security_scan([skill], ({"name": "mock", "enabled": True},), "high")
+    assert report2.overall is ScanStatus.FAIL
+
+
 def test_required_provider_not_available_is_error(monkeypatch, tmp_path) -> None:
     skill = _skill(tmp_path)
     _patch_provider(monkeypatch, "mock", MockProvider("mock", available=False))

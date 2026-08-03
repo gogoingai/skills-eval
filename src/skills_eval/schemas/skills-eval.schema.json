@@ -80,6 +80,11 @@
         },
         "enabled": { "type": "boolean" },
         "required": { "type": "boolean" },
+        "failOn": {
+          "type": "string",
+          "enum": ["info", "low", "medium", "high", "critical"],
+          "description": "Per-provider failOn threshold, overrides the global security.failOn."
+        },
         "options": { "type": "object" },
         "suppress": {
           "type": "array",

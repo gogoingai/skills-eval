@@ -218,7 +218,12 @@ def run_publish(
     results: list[PublishItemResult] = []
     for target_config in target_configs:
         context = _context_for(base_context, target_config)
-        results.extend(PublisherRegistry.create(context.target)(context))
+        out(f"→ 发布到 {context.target} ...")
+        target_results = PublisherRegistry.create(context.target)(context)
+        succeeded = [r for r in target_results if r.ok]
+        failed = [r for r in target_results if not r.ok]
+        out(f"  完成: {len(succeeded)} 成功, {len(failed)} 失败")
+        results.extend(target_results)
 
     summary = PublishSummary(results=tuple(results))
     _print_summary(summary, dry_run, out)

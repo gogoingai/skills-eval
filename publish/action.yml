@@ -29,7 +29,7 @@ inputs:
   version:
     description: PyPI requirement used to run Skills Eval.
     required: false
-    default: skills-eval>=0.2.0,<0.3
+    default: skills-eval>=0.3.0,<0.4
   clawhub-token:
     description: ClawHub API token (clh_...). Pass a repository secret; it is only exposed as an environment variable.
     required: false

@@ -85,6 +85,12 @@ def run_security_scan(
         required = _source_required(source, name)
         options = _source_options(source)
         suppressed_ids = _source_suppress(source)
+        source_fail_on = _source_fail_on(source, fail_on)
+        source_fail_on_rank = (
+            fail_on_rank
+            if source_fail_on == fail_on
+            else FindingLevel.rank(source_fail_on)
+        )
 
         provider, create_error = _create_provider(name)
         if create_error is not None:
@@ -155,7 +161,7 @@ def run_security_scan(
             agg_status = ScanStatus.ERROR
         else:
             agg_status = worst_status(
-                effective_status(outcome, fail_on_rank, suppressed_rule_ids=suppressed_ids)
+                effective_status(outcome, source_fail_on_rank, suppressed_rule_ids=suppressed_ids)
                 for _, outcome in skill_outcomes
             )
 
@@ -167,7 +173,7 @@ def run_security_scan(
         for skill, outcome in skill_outcomes:
             active_findings, suppressed_findings = _split_findings(outcome.findings, suppressed_ids)
             eff = ScanStatus.ERROR if creds_missing_required else effective_status(
-                outcome, fail_on_rank, suppressed_rule_ids=suppressed_ids
+                outcome, source_fail_on_rank, suppressed_rule_ids=suppressed_ids
             )
             per_skill[skill.path].append(
                 (
@@ -356,6 +362,22 @@ def _source_name(source: Mapping[str, object]) -> str:
 def _source_required(source: Mapping[str, object], name: str) -> bool:
     value = source.get("required")
     return bool(value) if isinstance(value, bool) else _DEFAULT_REQUIRED.get(name, False)
+
+
+_KNOWN_FAIL_ON = frozenset({"info", "low", "medium", "high", "critical"})
+
+
+def _source_fail_on(source: Mapping[str, object], global_fail_on: str) -> str:
+    """Return the effective ``failOn`` threshold for a source.
+
+    When a source declares ``failOn`` it overrides the global threshold, e.g.
+    ``"failOn": "critical"`` means only critical findings from that provider
+    cause a FAIL (useful for non-deterministic LLM scanners).
+    """
+    value = source.get("failOn")
+    if isinstance(value, str) and value in _KNOWN_FAIL_ON:
+        return value
+    return global_fail_on
 
 
 def _source_options(source: Mapping[str, object]) -> dict[str, object]:
