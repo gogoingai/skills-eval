@@ -172,6 +172,10 @@ def run_security_scan(
         skip_reason: str | None = None
         for skill, outcome in skill_outcomes:
             active_findings, suppressed_findings = _split_findings(outcome.findings, suppressed_ids)
+            # When a per-source failOn demotes findings (e.g. failOn:"critical"
+            # on a "high" finding), demote the individual severity from FAIL
+            # to REVIEW so the overall CheckResult.severity is correct.
+            active_findings = _demote_findings(active_findings, source_fail_on_rank)
             eff = ScanStatus.ERROR if creds_missing_required else effective_status(
                 outcome, source_fail_on_rank, suppressed_rule_ids=suppressed_ids
             )
@@ -422,3 +426,30 @@ def _split_findings(
         else:
             active.append(finding)
     return tuple(active), tuple(suppressed)
+
+
+def _demote_findings(
+    findings: tuple[SecurityFinding, ...],
+    fail_on_rank: int,
+) -> tuple[SecurityFinding, ...]:
+    """Demote individual finding severities that are below *fail_on_rank*.
+
+    When a per-source failOn threshold is higher (stricter) than the global
+    default, a finding that was originally ``FAIL`` at its raw level should
+    be demoted to ``REVIEW`` so it doesn't cause ``NOT_READY`` through the
+    per-item severity aggregation.
+    """
+    from dataclasses import replace
+
+    from skills_eval.models import Severity
+
+    adjusted: list[SecurityFinding] = []
+    for finding in findings:
+        if (
+            finding.severity is Severity.FAIL
+            and FindingLevel.rank(finding.level) < fail_on_rank
+        ):
+            adjusted.append(replace(finding, severity=Severity.REVIEW))
+        else:
+            adjusted.append(finding)
+    return tuple(adjusted)

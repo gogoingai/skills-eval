@@ -27,14 +27,26 @@ _RATE_LIMIT = re.compile(r"429|rate.?limit|频率过高|请求过于频繁|频�
 _RATE_LIMIT_MAX_ATTEMPTS = 3
 
 
+_CMD_TIMEOUT_SECONDS = 120.0
+
+
 def _run_command(command: Sequence[str], root: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        command,
-        cwd=root,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    try:
+        return subprocess.run(
+            command,
+            cwd=root,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=_CMD_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(
+            args=command,
+            returncode=-1,
+            stdout="",
+            stderr=f"Command timed out after {_CMD_TIMEOUT_SECONDS:.0f}s",
+        )
 
 
 @dataclass(frozen=True)
