@@ -38,6 +38,11 @@ _CLAWHUB_SOFT_ERROR = re.compile(
     r"(?:^|\n)Error:\s|Plugin Inspector blocked publish", re.IGNORECASE
 )
 _SKILLHUB_RATE_LIMIT = re.compile(r"发布频率过高|429|请求过于频繁")
+_ALREADY_EXISTS = re.compile(
+    r"already exists|already published|version\s+.*already|conflict|duplicate"
+    r"|已存在|已发布|已上传|版本已存在|请勿重复",
+    re.IGNORECASE,
+)
 _DEFAULT_SKILLHUB_HOST = "https://api.skillhub.cn"
 
 
@@ -405,6 +410,13 @@ def _clawhub_package(
     context.out(f"\n=== 插件包{'预检' if context.dry_run else '发布'} {label} ===")
 
     if not context.dry_run:
+        # Pre-check: skip if this version is already published on ClawHub.
+        existing = _run_quietly(context, (binary, "package", "inspect", package_name))
+        if existing is not None and existing.returncode == 0:
+            match = re.search(r"Latest:\s*(\S+)", existing.stdout or "")
+            if match and match.group(1) == version:
+                context.out(f"  ⊙ {label} 已发布（Latest: {version}），跳过")
+                return PublishItemResult("clawhub", "plugin", True, "already published")
         validate = _run_quietly(context, (binary, "package", "validate", "."))
         if validate is None or validate.returncode != 0:
             context.out("✗ package validate 失败")
@@ -479,6 +491,10 @@ def _publish_with_retry(
         if completed.returncode == 0 and not (soft_error and soft_error.search(output)):
             context.out(f"✓ {item}")
             return PublishItemResult(target, item, True)
+        # Skip if the version was already published (avoid retry storm + rate limit).
+        if _ALREADY_EXISTS.search(output):
+            context.out(f"  ⊙ {item} 已发布，跳过")
+            return PublishItemResult(target, item, True, "already published, skipped")
         if rate_limit.search(output) and attempt < _MAX_ATTEMPTS:
             delay = retry_delay(attempt)
             context.out(f"  ⏳ {item} 限频，等 {delay}s 重试 ({attempt}/{_MAX_ATTEMPTS})...")

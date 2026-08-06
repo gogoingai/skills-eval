@@ -213,6 +213,65 @@ def test_inspector_block_counts_as_failure_despite_zero_exit(
     assert summary.failed[0].item == "wenqu-write@0.2.0"
 
 
+def test_already_published_version_is_skipped_not_retried(
+    tmp_path: Path, logged_in
+) -> None:
+    """When the platform says the version already exists, skip (ok=True) instead
+    of retrying as a rate-limit error - avoids the 10-minute retry storm."""
+    root = make_repo(tmp_path, skills=("wenqu-write",))
+    attempts = {"count": 0}
+
+    def runner(command, root):
+        command = tuple(command)
+        if command[1:3] == ("skill", "publish"):
+            attempts["count"] += 1
+            return fail(command, stderr="Error: version 0.2.0 already exists")
+        return ok(command)
+
+    summary = run_publish(
+        root,
+        targets=("clawhub",),
+        skills_only=True,
+        command_runner=runner,
+        sleeper=lambda s: None,
+        env=ENV,
+        out=lambda line: None,
+    )
+
+    assert summary.exit_code == 0
+    assert attempts["count"] == 1  # no retries
+    assert summary.succeeded[0].ok is True
+    assert "already" in summary.succeeded[0].message
+
+
+def test_clawhub_package_skips_when_version_already_published(
+    tmp_path: Path, logged_in
+) -> None:
+    """clawhub package inspect pre-check: if Latest == version, skip publishing."""
+    root = make_repo(tmp_path, skills=("wenqu-write",))
+
+    def runner(command, root):
+        command = tuple(command)
+        if command[1:3] == ("package", "inspect"):
+            return ok(command, stdout=f"Latest: 0.2.0\nTags: latest=0.2.0")
+        if command[1:3] == ("package", "publish"):
+            return fail(command, stderr="should not be called")
+        return ok(command)
+
+    summary = run_publish(
+        root,
+        targets=("clawhub",),
+        plugin_only=True,
+        command_runner=runner,
+        env=ENV,
+        out=lambda line: None,
+    )
+
+    assert summary.exit_code == 0
+    assert summary.succeeded[0].ok is True
+    assert "already" in summary.succeeded[0].message
+
+
 def test_skillhub_rate_limit_waits_75_seconds(tmp_path: Path, logged_in) -> None:
     root = make_repo(tmp_path, skills=("wenqu-write",))
     attempts = {"count": 0}

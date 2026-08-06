@@ -415,3 +415,65 @@ def test_all_enabled_scanners_run_and_fail_takes_precedence(
     assert len(scanners["first"].calls) == 1
     assert len(scanners["second"].calls) == 1
     assert result.exit_code == 1
+
+
+def test_per_source_fail_on_demotes_finding_severity_end_to_end(
+    plugin_factory,
+    monkeypatch,
+) -> None:
+    """A source-level failOn:'critical' must demote a HIGH finding's severity
+    everywhere - the provider status, the skill's security_status, and the
+    individual finding's severity - so CheckResult.severity/exit_code reflect
+    WARN, not FAIL. Regression test for the bug where SkillResult.findings
+    kept the finding's original FAIL severity even after the aggregate
+    per-skill/per-source status was correctly demoted to WARN."""
+    root = plugin_factory()
+    scanner = RecordingScanner(
+        {
+            "write": ScanOutcome(
+                status=ScanStatus.FAIL,
+                findings=(
+                    SecurityFinding(
+                        severity=Severity.FAIL,
+                        code="W012",
+                        message="Potentially malicious external URL detected.",
+                        source="snyk",
+                        rule_id="W012",
+                        level=FindingLevel.HIGH,
+                    ),
+                ),
+            )
+        }
+    )
+    monkeypatch.setattr(
+        "skills_eval.service.load_config",
+        lambda checked_root: (
+            type(
+                "Config",
+                (),
+                {
+                    "required_root_files": (),
+                    "required_skill_frontmatter": ("name", "description"),
+                    "forbidden_paths": (),
+                    "reference_extensions": (".md",),
+                    "publishing_targets": (),
+                    "security_sources": (
+                        {"name": "snyk", "enabled": True, "failOn": "critical"},
+                    ),
+                },
+            )(),
+            [],
+        ),
+    )
+    monkeypatch.setattr(
+        "skills_eval.security.summary.ScannerRegistry.create",
+        lambda name: scanner,
+    )
+
+    result = run_check(root, selector=None, dry_run=False)
+
+    assert result.skills[0].security_status is Severity.REVIEW
+    assert [item.severity for item in result.skill_results[0].findings] == [Severity.REVIEW]
+    assert result.status is CheckStatus.READY_WITH_WARNINGS
+    assert result.exit_code == 0
+
